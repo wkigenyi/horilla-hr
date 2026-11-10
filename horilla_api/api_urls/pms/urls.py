@@ -4,9 +4,15 @@ horilla_api/api_urls/pms/urls.py
 
 from django.urls import path
 
+from horilla_api.api_views.dashboard.views import PmsDashboardWidgetAPIView
 from horilla_api.api_views.pms.views import *
 
 urlpatterns = [
+    path(
+        "dashboard/<slug:widget>/",
+        PmsDashboardWidgetAPIView.as_view(),
+        name="api-pms-dashboard-widget",
+    ),
     # Period URLs
     path("period/", PeriodGetCreateAPIView.as_view()),
     path("period/<int:pk>/", PeriodGetUpdateDeleteAPIView.as_view()),

@@ -21,8 +21,41 @@ class ActiontypeSerializer(serializers.ModelSerializer):
 
 
 class EmployeeListSerializer(serializers.ModelSerializer):
+    """
+    Directory row. Matches the columns on the web employee table.
+
+    Personal email stays, as it already did. Phone is included only for a
+    caller who holds ``employee.view_employee``, the same gate the web table
+    uses for the phone column. Salary, address and bank details stay off this
+    payload; the work-info and bank ids are pointers, not the records.
+    """
+
     job_position_name = serializers.CharField(
         source="employee_work_info.job_position_id.job_position", read_only=True
+    )
+    department_name = serializers.CharField(
+        source="employee_work_info.department_id.department", read_only=True
+    )
+    shift_name = serializers.CharField(
+        source="employee_work_info.shift_id.employee_shift", read_only=True
+    )
+    work_type_name = serializers.CharField(
+        source="employee_work_info.work_type_id.work_type", read_only=True
+    )
+    job_role_name = serializers.CharField(
+        source="employee_work_info.job_role_id.job_role", read_only=True
+    )
+    reporting_manager = serializers.CharField(
+        source="employee_work_info.reporting_manager_id", read_only=True
+    )
+    company_name = serializers.CharField(
+        source="employee_work_info.company_id.company", read_only=True
+    )
+    work_email = serializers.CharField(
+        source="employee_work_info.email", read_only=True
+    )
+    date_joining = serializers.DateField(
+        source="employee_work_info.date_joining", read_only=True
     )
     employee_work_info_id = serializers.CharField(
         source="employee_work_info.id", read_only=True
@@ -38,11 +71,29 @@ class EmployeeListSerializer(serializers.ModelSerializer):
             "employee_first_name",
             "employee_last_name",
             "email",
-            "job_position_name",
-            "employee_work_info_id",
+            "phone",
+            "badge_id",
             "employee_profile",
+            "job_position_name",
+            "department_name",
+            "shift_name",
+            "work_type_name",
+            "job_role_name",
+            "reporting_manager",
+            "company_name",
+            "work_email",
+            "date_joining",
+            "employee_work_info_id",
             "employee_bank_details_id",
         ]
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not user or not user.has_perm("employee.view_employee"):
+            data.pop("phone", None)
+        return data
 
 
 class EmployeeSerializer(serializers.ModelSerializer):

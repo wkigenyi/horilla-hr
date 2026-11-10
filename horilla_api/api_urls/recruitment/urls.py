@@ -4,9 +4,15 @@ horilla_api/api_urls/recruitment/urls.py
 
 from django.urls import path
 
+from horilla_api.api_views.dashboard.views import RecruitmentDashboardWidgetAPIView
 from horilla_api.api_views.recruitment.views import *
 
 urlpatterns = [
+    path(
+        "dashboard/<slug:widget>/",
+        RecruitmentDashboardWidgetAPIView.as_view(),
+        name="api-recruitment-dashboard-widget",
+    ),
     # Recruitment URLs
     path("recruitment/", RecruitmentGetCreateAPIView.as_view()),
     path("recruitment/<int:pk>/", RecruitmentGetUpdateDeleteAPIView.as_view()),

@@ -69,6 +69,7 @@ class CapabilitiesTests(TestCase):
     def test_plain_employee_is_employee(self):
         self.assertEqual(build_capabilities(self.user)["role"], "employee")
         self.assertFalse(build_capabilities(self.user)["permissions"]["view_team"])
+        self.assertFalse(build_capabilities(self.user)["permissions"]["manage_roles"])
 
     def test_reporting_manager_is_manager(self):
         report = make_employee(
@@ -86,6 +87,7 @@ class CapabilitiesTests(TestCase):
     def test_superuser_is_hrexec(self):
         admin = make_user("caps_admin", password=PASSWORD, is_superuser=True)
         self.assertEqual(build_capabilities(admin)["role"], "hrexec")
+        self.assertTrue(build_capabilities(admin)["permissions"]["manage_roles"])
 
     def test_features_report_installed_apps_explicitly(self):
         features = build_capabilities(self.user)["features"]

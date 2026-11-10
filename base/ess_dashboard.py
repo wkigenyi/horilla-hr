@@ -24,6 +24,24 @@ def _get_employee(request):
     return getattr(request.user, "employee_get", None)
 
 
+def _check_in_enabled(request):
+    """Whether this company records check-in, for the attendance calendar.
+
+    The web page stores the company on the session. A token request has no
+    session company, so fall back to the tenant set during API auth. A
+    superuser has no tenant, which matches the web "all companies" row.
+    """
+    if request.session.get("selected_company"):
+        return is_check_in_enabled(request)
+
+    from attendance.models import AttendanceGeneralSetting
+    from horilla.horilla_middlewares import get_selected_company
+
+    company_id = get_selected_company()
+    settings = AttendanceGeneralSetting.objects.filter(company_id=company_id).first()
+    return bool(settings and settings.enable_check_in)
+
+
 def _parse_period(request):
     """Parse from_date and to_date from GET params. Defaults to current month."""
     today = date.today()
@@ -327,6 +345,8 @@ def ess_leave_requests(request):
                     "days": float(lr.requested_days or 1),
                     "status": lr.status,
                     "status_label": status_labels.get(lr.status, lr.status),
+                    "start_date": lr.start_date.isoformat(),
+                    "end_date": lr.end_date.isoformat(),
                 }
             )
     except Exception:
@@ -371,7 +391,7 @@ def ess_attendance_calendar(request):
         return JsonResponse({"error": "no employee"}, status=403)
 
     from_date, to_date = _parse_period(request)
-    check_in_enabled = is_check_in_enabled(request)
+    check_in_enabled = _check_in_enabled(request)
 
     attendance_map = {}
     late_dates = set()
@@ -488,6 +508,7 @@ def ess_attendance_calendar(request):
             "to_date": to_date.isoformat(),
             "days": days,
             "summary": summary,
+            "check_in_enabled": check_in_enabled,
         }
     )
 
@@ -574,6 +595,8 @@ def ess_payslips(request):
                     "gross_pay": round(float(ps.gross_pay or 0), 2),
                     "deduction": round(float(ps.deduction or 0), 2),
                     "status": ps.status,
+                    "start_date": ps.start_date.isoformat() if ps.start_date else None,
+                    "end_date": ps.end_date.isoformat() if ps.end_date else None,
                 }
             )
         if results:
@@ -696,9 +719,11 @@ def ess_announcements(request):
                     "date": (
                         ann.created_at.strftime("%b %d, %Y") if ann.created_at else ""
                     ),
+                    "created_at": ann.created_at.isoformat() if ann.created_at else None,
                     "expire_date": (
                         ann.expire_date.strftime("%b %d") if ann.expire_date else None
                     ),
+                    "expire_on": ann.expire_date.isoformat() if ann.expire_date else None,
                 }
             )
     except Exception:
@@ -783,6 +808,8 @@ def ess_upcoming(request):
                         if h.end_date
                         else h.start_date.strftime("%b %d")
                     ),
+                    "start_date": h.start_date.isoformat(),
+                    "end_date": (h.end_date or h.start_date).isoformat(),
                     "days_away": (h.start_date - today).days,
                 }
             )
@@ -799,7 +826,11 @@ def ess_upcoming(request):
                 bday = dob.replace(year=today.year + 1)
             days_away = (bday - today).days
             if days_away <= 30:
-                birthday = {"date": bday.strftime("%b %d"), "days_away": days_away}
+                birthday = {
+                    "date": bday.strftime("%b %d"),
+                    "on": bday.isoformat(),
+                    "days_away": days_away,
+                }
     except Exception:
         pass
 
@@ -816,6 +847,7 @@ def ess_upcoming(request):
             if days_away <= 30 and years > 0:
                 anniversary = {
                     "date": ann.strftime("%b %d"),
+                    "on": ann.isoformat(),
                     "days_away": days_away,
                     "years": years,
                 }

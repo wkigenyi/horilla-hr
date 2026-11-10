@@ -87,7 +87,10 @@ def build_capabilities(user):
             "view_team": is_reportingmanager(_FakeRequest(user)),
             "edit_employee": user.has_perm("employee.change_employee"),
             "view_payslip": user.has_perm("payroll.view_payslip"),
+            "change_payslip": user.has_perm("payroll.change_payslip"),
+            "add_payslip": user.has_perm("payroll.add_payslip"),
             "edit_own_profile": edit_own_profile,
+            "manage_roles": user.is_superuser,
         },
         "features": {label: apps.is_installed(label) for label in OPTIONAL_APPS},
     }

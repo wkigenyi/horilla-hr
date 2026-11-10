@@ -37,6 +37,7 @@ urlpatterns = [
     path("docs/", schema_view.with_ui("swagger", cache_timeout=0), name="schema-docs"),
     # API Endpoints (static configuration)
     path("auth/", include("horilla_api.api_urls.auth.urls")),
+    path("setup/", include("horilla_api.api_urls.setup.urls")),
     path("asset/", include("horilla_api.api_urls.asset.urls")),
     path("base/", include("horilla_api.api_urls.base.urls")),
     path("employee/", include("horilla_api.api_urls.employee.urls")),
@@ -52,4 +53,6 @@ urlpatterns = [
     path("pms/", include("horilla_api.api_urls.pms.urls")),
     # Screen-shaped aggregates for the mobile client; see api_views/mobile.
     path("mobile/", include("horilla_api.api_urls.mobile.urls")),
+    # The analytics home dashboard: persona summary plus one widget per slug.
+    path("dashboard/", include("horilla_api.api_urls.dashboard.urls")),
 ]

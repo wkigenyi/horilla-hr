@@ -1,5 +1,7 @@
 import gettext
+import json
 from collections import defaultdict
+from datetime import date, datetime
 
 from django.contrib.auth.decorators import permission_required
 from django.shortcuts import render
@@ -11,6 +13,7 @@ from rest_framework.views import APIView
 
 from base.backends import ConfiguredEmailBackend
 from base.methods import eval_validate, filtersubordinates
+from employee.models import Employee
 from horilla_api.api_methods.base.methods import reject_reason_from
 from horilla_api.api_methods.base.pagination import HorillaPageNumberPagination
 from payroll.filters import (
@@ -19,6 +22,7 @@ from payroll.filters import (
     DeductionFilter,
     PayslipFilter,
 )
+from payroll.methods.methods import calculate_employer_contribution, save_payslip
 from payroll.models.models import (
     Allowance,
     Contract,
@@ -30,6 +34,7 @@ from payroll.models.models import (
 )
 from payroll.models.tax_models import TaxBracket
 from payroll.threadings.mail import MailSendThread
+from payroll.views.component_views import payroll_calculation
 from payroll.views.views import payslip_pdf
 
 from ...api_decorators.base.decorators import approver_permission_required
@@ -43,6 +48,44 @@ from ...api_serializers.payroll.serializers import (
     ReimbursementSerializer,
     TaxBracketSerializer,
 )
+
+
+def _payslip_status_choices():
+    return {choice[0] for choice in Payslip._meta.get_field("status").choices}
+
+
+def _parse_date(value):
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, str) and value.strip():
+        return date.fromisoformat(value.strip()[:10])
+    return None
+
+
+def _as_id_list(value):
+    if value is None:
+        return []
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        try:
+            value = json.loads(text)
+        except json.JSONDecodeError:
+            return [item for item in text.split(",") if item.strip().isdigit()]
+    if isinstance(value, (int, float)):
+        return [int(value)]
+    if not isinstance(value, (list, tuple)):
+        return []
+    ids = []
+    for item in value:
+        try:
+            ids.append(int(item))
+        except (TypeError, ValueError):
+            continue
+    return ids
 
 
 class PayslipView(APIView):
@@ -77,6 +120,154 @@ class PayslipView(APIView):
         page = pagination.paginate_queryset(payslip_filter_queryset, request)
         serializer = PayslipSerializer(page, many=True)
         return pagination.get_paginated_response(serializer.data)
+
+    @method_decorator(permission_required("payroll.change_payslip"))
+    def put(self, request, id):
+        payslip = Payslip.objects.filter(id=id).first()
+        if payslip is None:
+            return Response({"detail": "Not found."}, status=404)
+        status = request.data.get("status")
+        valid = _payslip_status_choices()
+        if status not in valid:
+            return Response({"status": [_("Invalid status.")]}, status=400)
+        payslip.status = status
+        payslip.save(update_fields=["status"])
+        serializer = PayslipSerializer(payslip)
+        return Response(serializer.data, status=200)
+
+
+class PayslipBulkStatusView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @method_decorator(permission_required("payroll.change_payslip"))
+    def post(self, request):
+        ids = _as_id_list(request.data.get("ids"))
+        status = request.data.get("status")
+        valid = _payslip_status_choices()
+        if not ids:
+            return Response(
+                {"ids": [_("Select at least one payslip.")]}, status=400
+            )
+        if status not in valid:
+            return Response({"status": [_("Invalid status.")]}, status=400)
+        slips = Payslip.objects.filter(id__in=ids)
+        updated = slips.update(status=status)
+        return Response(
+            {
+                "updated": updated,
+                "status": status,
+                "message": _("%(count)s payslips updated.") % {"count": updated},
+            },
+            status=200,
+        )
+
+
+class PayslipGenerateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @method_decorator(permission_required("payroll.add_payslip"))
+    def post(self, request):
+        employee_ids = _as_id_list(
+            request.data.get("employee_id") or request.data.get("employee_ids")
+        )
+        start_date = _parse_date(request.data.get("start_date"))
+        end_date = _parse_date(request.data.get("end_date"))
+        group_name = request.data.get("group_name") or None
+        if isinstance(group_name, str):
+            group_name = group_name.strip() or None
+
+        errors = {}
+        if not employee_ids:
+            errors["employee_id"] = [_("Select at least one employee.")]
+        if not start_date:
+            errors["start_date"] = [_("Start date is required.")]
+        if not end_date:
+            errors["end_date"] = [_("End date is required.")]
+        if start_date and end_date and end_date < start_date:
+            errors["end_date"] = [
+                _("The end date must be greater than or equal to the start date.")
+            ]
+        if errors:
+            return Response(errors, status=400)
+
+        employees = Employee.objects.filter(
+            id__in=employee_ids,
+            is_active=True,
+            contract_set__isnull=False,
+            contract_set__contract_status="active",
+        ).distinct()
+        if not employees.exists():
+            return Response(
+                {"employee_id": [_("No active employees with contracts found.")]},
+                status=400,
+            )
+
+        from attendance.views.summary import build_monthly_summary
+
+        att_rows, _total_working, _summary_totals = build_monthly_summary(
+            start_date, end_date, employees
+        )
+        att_summary = {row["employee"].pk: row for row in att_rows}
+
+        created = []
+        skipped = []
+        for employee in employees:
+            period_start = start_date
+            period_end = end_date
+            contract = Contract.objects.filter(
+                employee_id=employee, contract_status="active"
+            ).first()
+            if not contract:
+                skipped.append(
+                    {"employee_id": employee.id, "reason": _("No active contract.")}
+                )
+                continue
+            if period_start < contract.contract_start_date:
+                period_start = contract.contract_start_date
+            if period_end < period_start:
+                skipped.append(
+                    {
+                        "employee_id": employee.id,
+                        "reason": _("Contract has not started yet."),
+                    }
+                )
+                continue
+
+            payslip = payroll_calculation(
+                employee,
+                period_start,
+                period_end,
+                month_summary=att_summary.get(employee.pk, {}),
+            )
+            data = {
+                "employee": employee,
+                "group_name": group_name,
+                "start_date": payslip["start_date"],
+                "end_date": payslip["end_date"],
+                "status": "draft",
+                "contract_wage": payslip["contract_wage"],
+                "basic_pay": payslip["basic_pay"],
+                "gross_pay": payslip["gross_pay"],
+                "deduction": payslip["total_deductions"],
+                "net_pay": payslip["net_pay"],
+                "pay_data": json.loads(payslip["json_data"]),
+                "installments": payslip["installments"],
+            }
+            calculate_employer_contribution(data)
+            instance = save_payslip(**data)
+            created.append(instance.id)
+
+        return Response(
+            {
+                "created": len(created),
+                "ids": created,
+                "skipped": skipped,
+                "group_name": group_name,
+                "message": _("%(count)s payslips saved as draft")
+                % {"count": len(created)},
+            },
+            status=200,
+        )
 
 
 class PayslipDownloadView(APIView):
@@ -159,8 +350,8 @@ class ContractView(APIView):
         return Response(serializer.errors, status=400)
 
     @method_decorator(permission_required("payroll.change_contract"))
-    def put(self, request, pk):
-        contract = Contract.objects.get(id=pk)
+    def put(self, request, id):
+        contract = Contract.objects.get(id=id)
         serializer = ContractSerializer(instance=contract, data=request.data)
         if serializer.is_valid():
             serializer.save()
@@ -168,8 +359,8 @@ class ContractView(APIView):
         return Response(serializer.errors, status=400)
 
     @method_decorator(permission_required("payroll.delete_contract"))
-    def delete(self, request, pk):
-        contract = Contract.objects.get(id=pk)
+    def delete(self, request, id):
+        contract = Contract.objects.get(id=id)
         contract.delete()
         return Response({"status": "deleted"}, status=200)
 

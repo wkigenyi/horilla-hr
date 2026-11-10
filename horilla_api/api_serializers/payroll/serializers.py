@@ -1,3 +1,5 @@
+import math
+
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
@@ -17,6 +19,9 @@ from payroll.models.tax_models import TaxBracket
 
 
 class PayslipSerializer(serializers.ModelSerializer):
+    employee_full_name = serializers.CharField(
+        source="employee_id.get_full_name", read_only=True
+    )
     employee_first_name = serializers.CharField(
         source="employee_id.employee_first_name", read_only=True
     )
@@ -325,6 +330,21 @@ class ReimbursementSerializer(serializers.ModelSerializer):
 
 
 class TaxBracketSerializer(serializers.ModelSerializer):
+    """An empty maximum is stored as infinity, which JSON cannot encode."""
+
     class Meta:
         fields = "__all__"
         model = TaxBracket
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        max_income = data.get("max_income")
+        if isinstance(max_income, float) and not math.isfinite(max_income):
+            data["max_income"] = None
+        return data
+
+    def validate(self, attrs):
+        sent = not self.partial or "max_income" in self.initial_data
+        if sent and attrs.get("max_income") is None:
+            attrs["max_income"] = math.inf
+        return attrs

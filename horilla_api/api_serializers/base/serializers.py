@@ -6,6 +6,7 @@ from rest_framework import serializers
 from rest_framework.fields import get_error_detail
 
 from base.models import (
+    DAY,
     Company,
     Department,
     EmployeeShift,
@@ -28,6 +29,9 @@ class CompanySerializer(serializers.ModelSerializer):
     class Meta:
         model = Company
         fields = "__all__"
+        # CompanyForm marks the logo optional. Leaving it required here blocked
+        # the same first-run company step the HTML wizard allows with no file.
+        extra_kwargs = {"icon": {"required": False, "allow_null": True}}
 
 
 class JobPositionSerializer(serializers.ModelSerializer):
@@ -207,6 +211,13 @@ class EmployeeShiftScheduleSerializer(serializers.ModelSerializer):
         model = EmployeeShiftSchedule
         fields = "__all__"
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        day = getattr(instance, "day", None)
+        if day is not None and getattr(day, "day", None):
+            data["weekday"] = day.day
+        return data
+
 
 class RotatingShiftSerializer(serializers.ModelSerializer):
     class Meta:
@@ -269,7 +280,8 @@ class RotatingShiftAssignSerializer(serializers.ModelSerializer):
         if instance.based_on == "after":
             representation["rotate"] = f"Rotate after {instance.rotate_after_day} days"
         elif instance.based_on == "weekly":
-            representation["rotate"] = f"Weekly every {instance.rotate_every_weekend}"
+            weekday = dict(DAY).get(instance.rotate_every_weekend, instance.rotate_every_weekend)
+            representation["rotate"] = f"Weekly every {weekday}"
         elif instance.based_on == "monthly":
             if instance.rotate_every == "1":
                 representation["rotate"] = (

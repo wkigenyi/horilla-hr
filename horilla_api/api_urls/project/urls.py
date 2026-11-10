@@ -4,9 +4,15 @@ horilla_api/api_urls/project/urls.py
 
 from django.urls import path
 
+from horilla_api.api_views.dashboard.views import ProjectDashboardWidgetAPIView
 from horilla_api.api_views.project.views import *
 
 urlpatterns = [
+    path(
+        "dashboard/<slug:widget>/",
+        ProjectDashboardWidgetAPIView.as_view(),
+        name="api-project-dashboard-widget",
+    ),
     # Project URLs
     path("project/", ProjectGetCreateAPIView.as_view()),
     path("project/<int:pk>/", ProjectGetUpdateDeleteAPIView.as_view()),

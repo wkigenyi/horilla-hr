@@ -4,9 +4,15 @@ horilla_api/api_urls/offboarding/urls.py
 
 from django.urls import path
 
+from horilla_api.api_views.dashboard.views import OffboardingDashboardWidgetAPIView
 from horilla_api.api_views.offboarding.views import *
 
 urlpatterns = [
+    path(
+        "dashboard/<slug:widget>/",
+        OffboardingDashboardWidgetAPIView.as_view(),
+        name="api-offboarding-dashboard-widget",
+    ),
     # Offboarding URLs
     path("offboarding/", OffboardingGetCreateAPIView.as_view()),
     path("offboarding/<int:pk>/", OffboardingGetUpdateDeleteAPIView.as_view()),

@@ -6,8 +6,14 @@ from django.urls import path
 
 from horilla_api.api_views.attendance.permission_views import AttendancePermissionCheck
 from horilla_api.api_views.attendance.views import *
+from horilla_api.api_views.dashboard.views import AttendanceDashboardWidgetAPIView
 
 urlpatterns = [
+    path(
+        "dashboard/<slug:widget>/",
+        AttendanceDashboardWidgetAPIView.as_view(),
+        name="api-attendance-dashboard-widget",
+    ),
     path("clock-in/", ClockInAPIView.as_view(), name="api-check-in"),
     path("clock-out/", ClockOutAPIView.as_view(), name="api-check-out"),
     path("attendance/", AttendanceView.as_view(), name="api-attendance-list"),

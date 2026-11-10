@@ -4,9 +4,15 @@ horilla_api/api_urls/helpdesk/urls.py
 
 from django.urls import path
 
+from horilla_api.api_views.dashboard.views import HelpdeskDashboardWidgetAPIView
 from horilla_api.api_views.helpdesk.views import *
 
 urlpatterns = [
+    path(
+        "dashboard/<slug:widget>/",
+        HelpdeskDashboardWidgetAPIView.as_view(),
+        name="api-helpdesk-dashboard-widget",
+    ),
     # Ticket Type URLs
     path("ticket-type/", TicketTypeGetCreateAPIView.as_view()),
     path("ticket-type/<int:pk>/", TicketTypeGetUpdateDeleteAPIView.as_view()),

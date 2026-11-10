@@ -9,6 +9,7 @@ from rest_framework import authentication
 # Module tags for organizing endpoints
 MODULE_TAGS = {
     "auth": "Authentication",
+    "setup": "Database setup",
     "asset": "Asset Management",
     "base": "Base",
     "employee": "Employee Management",

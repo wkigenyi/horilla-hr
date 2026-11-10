@@ -1,8 +1,15 @@
 from django.urls import path, re_path
 
+from horilla_api.api_views.dashboard.views import AssetDashboardWidgetAPIView
+
 from ...api_views.asset.views import *
 
 urlpatterns = [
+    path(
+        "dashboard/<slug:widget>/",
+        AssetDashboardWidgetAPIView.as_view(),
+        name="api-asset-dashboard-widget",
+    ),
     re_path(
         r"^asset-categories/(?P<pk>\d+)?$",
         AssetCategoryAPIView.as_view(),

@@ -23,6 +23,57 @@ from ...api_serializers.auth.serializers import (
 )
 
 
+def build_login_payload(user):
+    """JWT login body shared by /auth/login/ and first-run setup.
+
+    Callers must already have an employee on ``user``. Company face-detection
+    and geofence settings are optional and stay out of the payload when absent.
+    """
+    refresh = RefreshToken.for_user(user)
+    employee = user.employee_get
+    face_detection = False
+    face_detection_image = None
+    geo_fencing = False
+    company_id = None
+    # Each of these is optional configuration: get_company() can return None,
+    # the face_detection reverse one-to-one need not exist, and an ImageField
+    # with no file raises on .url. Geofencing uses the company fence, or the
+    # global one when the company has none. Narrowed from bare excepts so a
+    # genuine failure in this block is logged instead of silently degrading
+    # the login response.
+    company = employee.get_company()
+    if company is not None:
+        company_id = company.id
+        try:
+            face_detection = company.face_detection.start
+        except (ObjectDoesNotExist, AttributeError):
+            pass
+        # the company's own fence, else the global one
+        from geofencing.models import GeoFencing
+
+        fence = GeoFencing.for_company(company)
+        geo_fencing = bool(fence and fence.start)
+    try:
+        face_detection_image = employee.face_detection.image.url
+    except (ObjectDoesNotExist, AttributeError, ValueError):
+        pass
+    return {
+        "employee": GetEmployeeSerializer(employee).data,
+        "access": str(refresh.access_token),
+        # Previously minted and thrown away, which left clients with a
+        # 60-minute session and no way to extend it.
+        "refresh": str(refresh),
+        # Role, permission set and feature manifest in the login response so
+        # the client can paint its navigation on the first frame rather than
+        # after a dozen permission probes.
+        "capabilities": build_capabilities(user),
+        "face_detection": face_detection,
+        "face_detection_image": face_detection_image,
+        "geo_fencing": geo_fencing,
+        "company_id": company_id,
+    }
+
+
 class LoginAPIView(APIView):
     permission_classes = [AllowAny]
     # The only unauthenticated write path in the API. django-axes locks an
@@ -86,50 +137,7 @@ class LoginAPIView(APIView):
             # and axes raises rather than silently allowing it.
             user = authenticate(request, username=username, password=password)
             if user:
-                refresh = RefreshToken.for_user(user)
-                employee = user.employee_get
-                face_detection = False
-                face_detection_image = None
-                geo_fencing = False
-                company_id = None
-                # Each of these is optional configuration: get_company() can
-                # return None, the face_detection and geo_fencing reverse
-                # one-to-ones need not exist, and an ImageField with no file
-                # raises on .url. Narrowed from bare excepts so a genuine
-                # failure in this block is logged instead of silently
-                # degrading the login response.
-                company = employee.get_company()
-                if company is not None:
-                    company_id = company.id
-                    try:
-                        face_detection = company.face_detection.start
-                    except (ObjectDoesNotExist, AttributeError):
-                        pass
-                    # the company's own fence, else the global one
-                    from geofencing.models import GeoFencing
-
-                    fence = GeoFencing.for_company(company)
-                    geo_fencing = bool(fence and fence.start)
-                try:
-                    face_detection_image = employee.face_detection.image.url
-                except (ObjectDoesNotExist, AttributeError, ValueError):
-                    pass
-                result = {
-                    "employee": GetEmployeeSerializer(employee).data,
-                    "access": str(refresh.access_token),
-                    # Previously minted and thrown away, which left clients
-                    # with a 60-minute session and no way to extend it.
-                    "refresh": str(refresh),
-                    # Role, permission set and feature manifest in the login
-                    # response so the client can paint its navigation on the
-                    # first frame rather than after a dozen permission probes.
-                    "capabilities": build_capabilities(user),
-                    "face_detection": face_detection,
-                    "face_detection_image": face_detection_image,
-                    "geo_fencing": geo_fencing,
-                    "company_id": company_id,
-                }
-                return Response(result, status=200)
+                return Response(build_login_payload(user), status=200)
             else:
                 # A locked-out caller must be told so, not handed another 401.
                 # AxesStandaloneBackend returns None rather than raising, so

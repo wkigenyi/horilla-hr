@@ -1,6 +1,6 @@
 from django.urls import path, re_path
 
-from ...api_views.base import views
+from ...api_views.base import preferences, roles, views
 
 urlpatterns = [
     path(
@@ -256,6 +256,44 @@ urlpatterns = [
         "check-user-level", views.CheckUserLevel.as_view(), name="api-check-user-level"
     ),
     path("capabilities/", views.CapabilitiesAPIView.as_view(), name="api-capabilities"),
+    path(
+        "system-preferences/",
+        preferences.SystemPreferencesAPIView.as_view(),
+        name="api-system-preferences",
+    ),
+    path(
+        "color-themes/",
+        preferences.ColorThemeListAPIView.as_view(),
+        name="api-color-themes",
+    ),
+    path(
+        "color-themes/activate/",
+        preferences.ColorThemeActivateAPIView.as_view(),
+        name="api-color-themes-activate",
+    ),
+    path(
+        "color-themes/default/",
+        preferences.ColorThemeDefaultAPIView.as_view(),
+        name="api-color-themes-default",
+    ),
+    path("roles/", roles.RoleListAPIView.as_view(), name="api-roles"),
+    path("roles/people/", roles.RolePeopleAPIView.as_view(), name="api-role-people"),
+    path(
+        "roles/people/<int:employee_id>/permissions/",
+        roles.EmployeePermissionsAPIView.as_view(),
+        name="api-employee-permissions",
+    ),
+    path("roles/<int:pk>/", roles.RoleDetailAPIView.as_view(), name="api-role-detail"),
+    path(
+        "roles/<int:pk>/members/",
+        roles.RoleMemberAPIView.as_view(),
+        name="api-role-members",
+    ),
+    path(
+        "roles/<int:pk>/members/<int:employee_id>/",
+        roles.RoleMemberAPIView.as_view(),
+        name="api-role-member",
+    ),
     path(
         "announcement-view",
         views.AnnouncementListAPIView.as_view(),

@@ -261,9 +261,11 @@ def directory_is_accessible(request):
 
     Only ever widens which *rows* are listed; the payload is unchanged.
     Be clear about what that payload is, though, because widening who can see
-    it is the point of this function: ``EmployeeListSerializer`` returns id,
-    first and last name, job position, avatar, **email**, and the row ids of
-    the employee's work-information and bank-details records.
+    it is the point of this function: ``EmployeeListSerializer`` returns the
+    web directory columns (name, email, badge, job, department, shift, work
+    type, job role, reporting manager, company, work email, joining date,
+    avatar) plus the row ids of the work-information and bank-details records.
+    Phone is present only when the caller holds ``employee.view_employee``.
 
     The two ids are safe to hand out -- ``EmployeeWorkInformationAPIView.get``
     and ``EmployeeBankDetailsAPIView.get`` each re-check that the caller is the
@@ -296,10 +298,17 @@ class EmployeeListAPIView(APIView):
         user = request.user
         search = request.query_params.get("search")
 
-        # Start with a base queryset with only required fields
-        employees_queryset = Employee.objects.only(
-            "id", "employee_first_name", "employee_last_name"
+        # Work-info names are directory columns, so load those relations with the row.
+        work_info = (
+            "employee_work_info__job_position_id",
+            "employee_work_info__department_id",
+            "employee_work_info__shift_id",
+            "employee_work_info__work_type_id",
+            "employee_work_info__job_role_id",
+            "employee_work_info__reporting_manager_id",
+            "employee_work_info__company_id",
         )
+        employees_queryset = Employee.objects.select_related(*work_info)
 
         # Permission-based filtering.
         #
@@ -318,9 +327,7 @@ class EmployeeListAPIView(APIView):
         else:
             subordinate_qs = user.employee_get.get_subordinate_employees()
             if subordinate_qs.exists():
-                employees_queryset = subordinate_qs.only(
-                    "id", "employee_first_name", "employee_last_name"
-                )
+                employees_queryset = subordinate_qs.select_related(*work_info)
             else:
                 employees_queryset = employees_queryset.filter(id=user.employee_get.id)
 
@@ -335,7 +342,7 @@ class EmployeeListAPIView(APIView):
         paginator = HorillaPageNumberPagination()
         page = paginator.paginate_queryset(employees_queryset, request)
 
-        serializer = EmployeeListSerializer(page, many=True)
+        serializer = EmployeeListSerializer(page, many=True, context={"request": request})
         return paginator.get_paginated_response(serializer.data)
 
 

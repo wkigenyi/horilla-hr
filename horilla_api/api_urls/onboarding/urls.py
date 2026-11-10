@@ -4,9 +4,15 @@ horilla_api/api_urls/onboarding/urls.py
 
 from django.urls import path
 
+from horilla_api.api_views.dashboard.views import OnboardingDashboardWidgetAPIView
 from horilla_api.api_views.onboarding.views import *
 
 urlpatterns = [
+    path(
+        "dashboard/<slug:widget>/",
+        OnboardingDashboardWidgetAPIView.as_view(),
+        name="api-onboarding-dashboard-widget",
+    ),
     # Onboarding Stage URLs
     path("onboarding-stage/", OnboardingStageGetCreateAPIView.as_view()),
     path("onboarding-stage/<int:pk>/", OnboardingStageGetUpdateDeleteAPIView.as_view()),

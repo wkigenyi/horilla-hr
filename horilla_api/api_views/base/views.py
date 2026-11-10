@@ -785,7 +785,7 @@ class EmployeeShiftScheduleView(APIView):
             serializer = self.serializer_class(employee_shift_schedule)
             return Response(serializer.data, status=200)
 
-        employee_shift_schedules = EmployeeShiftSchedule.objects.all()
+        employee_shift_schedules = EmployeeShiftSchedule.objects.select_related("day").all()
         serializer = self.serializer_class(employee_shift_schedules, many=True)
         return Response(serializer.data, status=200)
 

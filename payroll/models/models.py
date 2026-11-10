@@ -4175,11 +4175,12 @@ class Payslip(HorillaModel):
 
         ordering = [
             "-end_date",
+            "-id",
         ]
-        # Meta.ordering sorts every unqualified Payslip query by -end_date,
-        # and the UniqueConstraint below leads on employee_id so it cannot
-        # serve that sort. Payroll registers also filter by status within a
-        # period.
+        # Meta.ordering sorts every unqualified Payslip query by -end_date.
+        # id breaks ties: many payslips share an end date, and a page split
+        # on end date alone repeats rows. The UniqueConstraint below leads
+        # on employee_id so it cannot serve that sort.
         indexes = [
             models.Index(fields=["-end_date"], name="payslip_end_date_idx"),
             models.Index(fields=["status", "end_date"], name="payslip_status_date_idx"),

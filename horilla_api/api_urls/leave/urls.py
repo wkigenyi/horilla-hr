@@ -4,9 +4,15 @@ horilla_api/urls/leave/urls.py
 
 from django.urls import path
 
+from horilla_api.api_views.dashboard.views import LeaveDashboardWidgetAPIView
 from horilla_api.api_views.leave.views import *
 
 urlpatterns = [
+    path(
+        "dashboard/<slug:widget>/",
+        LeaveDashboardWidgetAPIView.as_view(),
+        name="api-leave-dashboard-widget",
+    ),
     path("available-leave/", EmployeeAvailableLeaveGetAPIView.as_view()),
     path("user-request/", EmployeeLeaveRequestGetCreateAPIView.as_view()),
     path("user-request/<int:pk>/", EmployeeLeaveRequestUpdateDeleteAPIView.as_view()),
