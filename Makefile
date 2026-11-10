@@ -1,7 +1,10 @@
 .PHONY: help dev prod build stop logs logs-web shell clean db-shell status restart makemessages compilemessages test-smoke test-unit test-cov
 
 COMPOSE ?= docker compose
-COMPOSE_PROD ?= $(COMPOSE) -f docker-compose.yml -f docker-compose.prod.yml
+# docker-compose.override.yml is the local port bind (see the .example).
+# `make prod` / `make stop` load it only when that file is present, so a
+# checkout without it still publishes nginx on 80 and web on 8000.
+COMPOSE_PROD ?= $(COMPOSE) -f docker-compose.yml -f docker-compose.prod.yml $(if $(wildcard docker-compose.override.yml),-f docker-compose.override.yml)
 I18N_EXCLUDES ?= --ignore=static/build/* --ignore=static/images/ionicons/*
 
 help: ## Show help

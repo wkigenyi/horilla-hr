@@ -51,19 +51,22 @@ class DashboardSummaryTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.data["role"], "leadership")
         visible = response.data["visible_charts"]
+        # Matches ROLE_DEFAULT_VISIBLE["leadership"] mapped through CHART_WIDGETS.
+        # Charts removed from the web home defaults (attendance-trend, etc.) stay
+        # available by slug but are not in the default persona set.
         for slug in (
-            "attendance-trend",
-            "department-overtime",
+            "department-headcount",
+            "gender",
+            "leave-breakdown",
+            "leave-trends",
             "attendance-overview",
-            "leave-coverage",
             "recruitment-pipeline",
             "turnover",
-            "payroll-summary",
         ):
             self.assertIn(slug, visible)
-        # Demoted charts stay off the default home.
         self.assertNotIn("recruitment-funnel", visible)
-        self.assertNotIn("gender", visible)
+        self.assertNotIn("attendance-trend", visible)
+        self.assertNotIn("payroll-summary", visible)
 
 
 class DashboardWidgetTests(TestCase):
@@ -93,7 +96,6 @@ class DashboardWidgetTests(TestCase):
             "on_leave",
             "pending_leaves",
             "new_joiners",
-            "open_recruitments",
             "date",
         ):
             self.assertIn(key, data)

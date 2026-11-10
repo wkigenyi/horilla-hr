@@ -104,6 +104,8 @@ celerybeat.pid
 
 # Environments
 .env
+# Local production port bind. Copy from docker-compose.override.yml.example.
+docker-compose.override.yml
 .venv
 env/
 venv/

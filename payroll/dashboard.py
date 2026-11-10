@@ -729,3 +729,98 @@ def payroll_run_coverage(request):
             ],
         }
     )
+
+# ---------------------------------------------------------------------------
+# Restored for horilla_api PAYROLL_WIDGETS (salary-dist / components).
+# ---------------------------------------------------------------------------
+
+@login_required
+@permission_required("payroll.view_payslip")
+def payroll_salary_distribution(request):
+    """Salary band distribution across employees who were active during the selected period."""
+    from employee.models import EmployeeWorkInformation
+
+    _from, to_date = _parse_period(request)
+    bands = []
+    try:
+        salaries = [
+            row["basic_salary"]
+            for row in EmployeeWorkInformation.objects.filter(
+                employee_id__is_active=True,
+                basic_salary__gt=0,
+                date_joining__lte=to_date,
+            ).values("pk", "basic_salary")
+        ]
+        if salaries:
+            max_sal = max(salaries)
+            step = max(1, round(max_sal / 6, -3)) or 10000
+            band_map = {}
+            for s in salaries:
+                band_start = int(s // step * step)
+                label = f"{band_start:,}–{band_start + step:,}"
+                band_map[band_start] = band_map.get(
+                    band_start,
+                    {
+                        "label": label,
+                        "count": 0,
+                        "min": band_start,
+                        "max": band_start + int(step),
+                    },
+                )
+                band_map[band_start]["count"] += 1
+            bands = [
+                {
+                    "label": v["label"],
+                    "count": v["count"],
+                    "min": v["min"],
+                    "max": v["max"],
+                }
+                for k, v in sorted(band_map.items())
+            ]
+    except Exception:
+        pass
+    return JsonResponse({"bands": bands})
+
+
+@login_required
+@permission_required("payroll.view_payslip")
+def payroll_component_breakdown(request):
+    """Top allowance and deduction components from pay_head_data."""
+    from payroll.models.models import Payslip
+
+    from_date, to_date = _parse_period(request)
+    components = []
+    try:
+        payslips = Payslip.objects.filter(
+            start_date__gte=from_date,
+            start_date__lte=to_date,
+            status__in=["confirmed", "paid"],
+        )
+        comp_map = {}
+        for ps in payslips:
+            if not ps.pay_head_data:
+                continue
+            for key in [
+                "gross_pay_deductions",
+                "basic_pay_deductions",
+                "pretax_deductions",
+                "post_tax_deductions",
+                "tax_deductions",
+                "net_deductions",
+            ]:
+                for item in ps.pay_head_data.get(key, []):
+                    title = item.get("title", _("Unknown"))
+                    amount = float(item.get("amount", 0))
+                    if title not in comp_map:
+                        comp_map[title] = {
+                            "title": title,
+                            "amount": 0,
+                            "type": "deduction",
+                        }
+                    comp_map[title]["amount"] += amount
+        components = sorted(comp_map.values(), key=lambda x: x["amount"], reverse=True)[
+            :10
+        ]
+    except Exception:
+        pass
+    return JsonResponse({"components": components})

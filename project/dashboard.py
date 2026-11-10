@@ -59,6 +59,21 @@ def _period_overlap(qs, request):
     )
 
 
+
+def _month_bounds(today, months_ago):
+    """First/last day of the month `months_ago` months before `today`."""
+    year = today.year
+    month = today.month - months_ago
+    while month <= 0:
+        month += 12
+        year -= 1
+    first = date(year, month, 1)
+    if first.month == 12:
+        last = date(first.year + 1, 1, 1) - timedelta(days=1)
+    else:
+        last = date(first.year, first.month + 1, 1) - timedelta(days=1)
+    return first, last
+
 @login_required
 def project_dashboard_view(request):
     from project.sidebar import dashboard_accessibility
@@ -350,4 +365,94 @@ def project_task_deadlines(request):
 
     return JsonResponse(
         {"upcoming": upcoming_data, "overdue": overdue_data, "total": total}
+    )
+
+# ---------------------------------------------------------------------------
+# Restored for horilla_api PROJECT_WIDGETS.
+# ---------------------------------------------------------------------------
+
+@login_required
+@is_projectmanager_or_member_or_perms(perm="project.view_project")
+def project_kpi_data(request):
+    """Total/Active/On Hold/Overdue counts, each with a small trend delta."""
+    from project.models import Project
+
+    today = date.today()
+    this_month_start, this_month_end = _month_bounds(today, 0)
+
+    active_qs = Project.objects.filter(is_active=True)
+    total = active_qs.count()
+    active = active_qs.filter(status="in_progress").count()
+    on_hold_qs = active_qs.filter(status="on_hold")
+    on_hold = on_hold_qs.count()
+    on_hold_overdue = on_hold_qs.filter(end_date__lt=today).count()
+    overdue = (
+        active_qs.filter(end_date__lt=today)
+        .exclude(status__in=["completed", "cancelled", "expired"])
+        .count()
+    )
+
+    total_new_this_month = active_qs.filter(
+        start_date__gte=this_month_start, start_date__lte=this_month_end
+    ).count()
+    active_started_this_month = active_qs.filter(
+        status="in_progress",
+        start_date__gte=this_month_start,
+        start_date__lte=this_month_end,
+    ).count()
+    overdue_new_this_month = (
+        active_qs.filter(
+            end_date__gte=this_month_start,
+            end_date__lte=min(this_month_end, today),
+        )
+        .exclude(status__in=["completed", "cancelled", "expired"])
+        .count()
+    )
+
+    return JsonResponse(
+        {
+            "total_projects": total,
+            "active_projects": active,
+            "on_hold_projects": on_hold,
+            "on_hold_overdue": on_hold_overdue,
+            "overdue_projects": overdue,
+            "total_new_this_month": total_new_this_month,
+            "active_started_this_month": active_started_this_month,
+            "overdue_new_this_month": overdue_new_this_month,
+        }
+    )
+
+
+@login_required
+@is_projectmanager_or_member_or_perms(perm="project.view_project")
+def project_monthly_trend(request):
+    """Projects started vs. completed vs. overdue, over the trailing 6 months."""
+    from project.models import Project
+
+    _, to_date = _parse_period(request)
+    today = to_date
+    months, started, completed, overdue = [], [], [], []
+    for i in range(5, -1, -1):
+        first, last = _month_bounds(today, i)
+        months.append(first.strftime("%b %Y"))
+        started.append(
+            Project.objects.filter(start_date__gte=first, start_date__lte=last).count()
+        )
+        completed.append(
+            Project.objects.filter(
+                status="completed", end_date__gte=first, end_date__lte=last
+            ).count()
+        )
+        overdue.append(
+            Project.objects.filter(end_date__gte=first, end_date__lte=last)
+            .exclude(status__in=["completed", "cancelled", "expired"])
+            .count()
+        )
+    return JsonResponse(
+        {
+            "months": months,
+            "started": started,
+            "completed": completed,
+            "overdue": overdue,
+        }
     )

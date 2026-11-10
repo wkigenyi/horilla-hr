@@ -1,0 +1,27 @@
+# Local port bind for a VM whose host Nginx already owns 80/443.
+#
+# Copy to docker-compose.override.yml (gitignored). `make prod` loads that
+# copy after docker-compose.prod.yml when the file exists. This file does
+# nothing until copied.
+#
+#   cp docker-compose.override.yml.example docker-compose.override.yml
+#   make prod
+#
+# Host Nginx then proxies the Horilla domain to 127.0.0.1:${HORILLA_HTTP_PORT:-8080}.
+#
+# Only ports belong here. Secrets, DEBUG, and volumes stay in .env and
+# docker-compose.prod.yml. Do not add .:/app — a volume listed here is
+# appended and would bind-mount source over the production image.
+#
+# !override is required. Without it Compose appends these ports onto the
+# base 80:80 and 8000:8000 publishes.
+
+services:
+  nginx:
+    ports: !override
+      - "127.0.0.1:${HORILLA_HTTP_PORT:-8080}:80"
+
+  # The bundled Nginx reaches gunicorn as web:8000 on the Compose network.
+  # Publishing 8000 on the host would bypass the host Nginx's TLS.
+  web:
+    ports: !override []

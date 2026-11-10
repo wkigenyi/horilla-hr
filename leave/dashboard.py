@@ -612,3 +612,66 @@ def leave_upcoming(request):
         pass
 
     return JsonResponse({"upcoming": upcoming})
+
+# ---------------------------------------------------------------------------
+# Restored for horilla_api LEAVE_WIDGETS slug monthly-trend.
+# ---------------------------------------------------------------------------
+
+@login_required
+@permission_required("leave.view_leaverequest")
+def leave_monthly_trend(request):
+    """Monthly leave request counts for the last 6 months."""
+    from leave.models import LeaveRequest
+
+    _, to_date = _parse_period(request)
+    today = to_date
+    months = []
+
+    base = today.replace(day=1)
+    for i in range(5, -1, -1):
+        year = base.year
+        month = base.month - i
+        while month <= 0:
+            month += 12
+            year -= 1
+        month_start = date(year, month, 1)
+        if month_start.month == 12:
+            month_end = date(month_start.year + 1, 1, 1) - timedelta(days=1)
+        else:
+            month_end = date(month_start.year, month_start.month + 1, 1) - timedelta(
+                days=1
+            )
+
+        approved = LeaveRequest.objects.filter(
+            status="approved",
+            start_date__gte=month_start,
+            start_date__lte=month_end,
+            employee_id__is_active=True,
+        ).count()
+
+        rejected = LeaveRequest.objects.filter(
+            status="rejected",
+            start_date__gte=month_start,
+            start_date__lte=month_end,
+            employee_id__is_active=True,
+        ).count()
+
+        pending = LeaveRequest.objects.filter(
+            status="requested",
+            start_date__gte=month_start,
+            start_date__lte=month_end,
+            employee_id__is_active=True,
+        ).count()
+
+        months.append(
+            {
+                "month": month_start.strftime("%b %Y"),
+                "approved": approved,
+                "rejected": rejected,
+                "pending": pending,
+                "from_date": month_start.isoformat(),
+                "to_date": month_end.isoformat(),
+            }
+        )
+
+    return JsonResponse({"months": months})

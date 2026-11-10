@@ -63,6 +63,24 @@ def _current_month_bounds():
     return start, end
 
 
+def _latest_attendance_date(reference_date=None):
+    """Return the latest attendance_date that actually has records.
+
+    Falls back to the given reference_date (or today) if no attendance
+    exists at all, so restored API charts can still query a safe day.
+    """
+    from attendance.models import Attendance
+
+    ref = reference_date or date.today()
+    latest = (
+        Attendance.objects.filter(attendance_date__lte=ref)
+        .order_by("-attendance_date")
+        .values_list("attendance_date", flat=True)
+        .first()
+    )
+    return latest or ref
+
+
 def _missing_punches_employees(today=None, employee_ids=None):
     """
     Active employees who should already be at work today but haven't
@@ -1064,3 +1082,379 @@ def attendance_overview(request):
             "month": _period_label(month_start, month_end),
         }
     )
+
+# ---------------------------------------------------------------------------
+# Restored for horilla_api ATTENDANCE_WIDGETS (trimmed from module UI).
+# ---------------------------------------------------------------------------
+
+@login_required
+def attendance_weekly_trend(request):
+    """Attendance headcount for the current calendar month.
+
+    Daily bars when span ≤ 14 days; otherwise aggregates by ISO week so the
+    chart stays readable. Always scoped to the current month (first day to
+    last day, via _current_month_bounds()) regardless of any from_date/
+    to_date GET params, so it stays in step with the KPI cards above.
+    """
+    from attendance.models import Attendance
+
+    from_date, to_date = _current_month_bounds()
+    today = date.today()
+    span = (to_date - from_date).days
+    employees = _scoped_employees(request)
+
+    counts = {
+        row["attendance_date"]: row["c"]
+        for row in (
+            Attendance.objects.filter(
+                attendance_date__gte=from_date,
+                attendance_date__lte=to_date,
+                employee_id__is_active=True,
+                employee_id__in=employees,
+            )
+            # Attendance's default ordering (-attendance_date, employee name,
+            # clock_in) otherwise leaks into the GROUP BY below, splintering
+            # each date into one group per employee instead of one total.
+            .order_by()
+            .values("attendance_date")
+            .annotate(c=Count("employee_id", distinct=True))
+        )
+    }
+
+    period_label = (
+        f"{from_date.strftime('%b %d')} – {to_date.strftime('%b %d, %Y')}"
+        if from_date.year == to_date.year
+        else f"{from_date.strftime('%b %d, %Y')} – {to_date.strftime('%b %d, %Y')}"
+    )
+
+    if span <= 14:
+        days = []
+        d = from_date
+        while d <= to_date:
+            days.append(
+                {
+                    "day": d.strftime("%a"),
+                    "date": d.isoformat(),
+                    "count": counts.get(d, 0),
+                    "is_today": d == today,
+                }
+            )
+            d += timedelta(days=1)
+        return JsonResponse(
+            {
+                "days": days,
+                "aggregate": "daily",
+                "week_start": from_date.isoformat(),
+                "period_label": period_label,
+            }
+        )
+
+    # Weekly aggregation
+    days = []
+    week_start = from_date - timedelta(days=from_date.weekday())  # Monday
+    while week_start <= to_date:
+        week_end = week_start + timedelta(days=6)
+        bucket_total = 0
+        d = max(week_start, from_date)
+        last = min(week_end, to_date)
+        contains_today = d <= today <= last
+        while d <= last:
+            bucket_total += counts.get(d, 0)
+            d += timedelta(days=1)
+        # Use the average daily headcount across the week to keep the y-axis
+        # comparable to daily mode.
+        bucket_days = (last - max(week_start, from_date)).days + 1
+        avg = round(bucket_total / bucket_days) if bucket_days > 0 else 0
+        label_start = max(week_start, from_date).strftime("%b %d")
+        days.append(
+            {
+                "day": label_start,
+                "date": max(week_start, from_date).isoformat(),
+                "count": avg,
+                "is_today": contains_today,
+            }
+        )
+        week_start += timedelta(days=7)
+
+    return JsonResponse(
+        {
+            "days": days,
+            "aggregate": "weekly",
+            "week_start": from_date.isoformat(),
+            "period_label": period_label,
+        }
+    )
+
+
+@login_required
+def attendance_department_breakdown(request):
+    """Attendance broken down by department for the selected date (to_date)."""
+    from attendance.models import Attendance
+
+    _, to_date = _parse_period(request)
+    today = _latest_attendance_date(to_date)
+    departments = []
+    employees = _scoped_employees(request)
+
+    try:
+        dept_data = (
+            Attendance.objects.filter(
+                attendance_date=today,
+                employee_id__is_active=True,
+                employee_id__in=employees,
+            )
+            # Clear Attendance's default ordering before grouping -- see
+            # attendance_weekly_trend for why it otherwise pollutes GROUP BY.
+            .order_by()
+            .values("employee_id__employee_work_info__department_id__department")
+            .annotate(present=Count("employee_id", distinct=True))
+            .order_by("-present")
+        )
+
+        for item in dept_data:
+            dept = item["employee_id__employee_work_info__department_id__department"]
+            if dept:
+                total_in_dept = employees.filter(
+                    employee_work_info__department_id__department=dept,
+                ).count()
+                departments.append(
+                    {
+                        "department": dept,
+                        "present": item["present"],
+                        "total": total_in_dept,
+                        "rate": (
+                            round((item["present"] / total_in_dept * 100), 1)
+                            if total_in_dept > 0
+                            else 0
+                        ),
+                    }
+                )
+    except Exception:
+        pass
+
+    return JsonResponse({"departments": departments, "date": today.isoformat()})
+
+
+@login_required
+def attendance_absenteeism_trend(request):
+    """Monthly absenteeism rate for the last 6 months.
+
+    "Expected" days excludes weekends, days before an employee's joining
+    date, approved leave, and company-wide holidays -- otherwise every
+    approved leave/holiday gets miscounted as an absence and the rate is
+    structurally overstated regardless of how complete attendance data is.
+    """
+    from attendance.models import Attendance
+    from base.models import Holidays
+    from leave.methods import holiday_dates_list
+    from leave.models import LeaveRequest
+
+    _, to_date = _parse_period(request)
+    today = to_date
+    months = []
+
+    try:
+        current_month_start = today.replace(day=1)
+
+        # Trailing-6-month window bounds, so holidays/leaves/employees are
+        # each fetched once instead of once per month.
+        year = current_month_start.year
+        month = current_month_start.month - 5
+        while month <= 0:
+            month += 12
+            year -= 1
+        window_start = date(year, month, 1)
+
+        scoped_employees = _scoped_employees(request)
+        employees = list(
+            scoped_employees.values("id", "employee_work_info__date_joining")
+        )
+
+        holiday_dates = set(
+            holiday_dates_list(
+                Holidays.objects.filter(
+                    start_date__lte=today,
+                    end_date__gte=window_start,
+                    is_specific=False,
+                )
+            )
+        )
+
+        leaves_by_employee = {}
+        for leave in LeaveRequest.objects.filter(
+            status="approved",
+            start_date__lte=today,
+            end_date__gte=window_start,
+        ).values("employee_id", "start_date", "end_date"):
+            leaves_by_employee.setdefault(leave["employee_id"], []).append(
+                (leave["start_date"], leave["end_date"] or leave["start_date"])
+            )
+
+        for i in range(5, -1, -1):
+            # Step back i full months using year/month arithmetic (no day drift)
+            year = current_month_start.year
+            month = current_month_start.month - i
+            while month <= 0:
+                month += 12
+                year -= 1
+            month_start = date(year, month, 1)
+            if month == 12:
+                month_end = date(year + 1, 1, 1) - timedelta(days=1)
+            else:
+                month_end = date(year, month + 1, 1) - timedelta(days=1)
+            month_end = min(month_end, today)
+
+            # Working days (Mon-Fri, non-holiday) in the month
+            working_dates = []
+            d = month_start
+            while d <= month_end:
+                if d.weekday() < 5 and d not in holiday_dates:
+                    working_dates.append(d)
+                d += timedelta(days=1)
+
+            if not working_dates or not employees:
+                months.append({"month": month_start.strftime("%b %Y"), "rate": 0})
+                continue
+
+            # Expected days: each employee's working days in the month,
+            # minus days before they joined and days covered by approved leave.
+            expected_days = 0
+            for emp in employees:
+                join_date = emp["employee_work_info__date_joining"]
+                emp_leaves = leaves_by_employee.get(emp["id"], [])
+                for d in working_dates:
+                    if join_date and d < join_date:
+                        continue
+                    if any(start <= d <= end for start, end in emp_leaves):
+                        continue
+                    expected_days += 1
+
+            # Count unique employee-days with attendance
+            present_days = (
+                Attendance.objects.filter(
+                    attendance_date__gte=month_start,
+                    attendance_date__lte=month_end,
+                    employee_id__is_active=True,
+                    employee_id__in=scoped_employees,
+                )
+                .values("employee_id", "attendance_date")
+                .distinct()
+                .count()
+            )
+
+            absent_days = max(0, expected_days - present_days)
+            absenteeism_rate = (
+                round((absent_days / expected_days * 100), 1) if expected_days else 0
+            )
+
+            months.append(
+                {
+                    "month": month_start.strftime("%b %Y"),
+                    "rate": absenteeism_rate,
+                    "absent_days": absent_days,
+                    "expected_days": expected_days,
+                }
+            )
+    except Exception:
+        months = [{"month": f"M{i+1}", "rate": 0} for i in range(6)]
+
+    return JsonResponse({"months": months})
+
+
+@login_required
+def attendance_clockin_distribution(request):
+    """Distribution of clock-in times for today (or latest day with records)."""
+    from attendance.models import Attendance
+
+    from_date, to_date = _parse_period(request)
+    target_date = _latest_attendance_date(to_date)
+    buckets = {}
+    try:
+        qs = Attendance.objects.filter(
+            attendance_date=target_date,
+            attendance_clock_in__isnull=False,
+            employee_id__in=_scoped_employees(request),
+        )
+        for att in qs:
+            hour = att.attendance_clock_in.hour
+            label = f"{hour:02d}:00"
+            buckets[label] = buckets.get(label, 0) + 1
+    except Exception:
+        pass
+    sorted_buckets = sorted(buckets.items())
+    return JsonResponse(
+        {
+            "hours": [b[0] for b in sorted_buckets],
+            "counts": [b[1] for b in sorted_buckets],
+            "date": target_date.isoformat(),
+        }
+    )
+
+
+@login_required
+def attendance_shift_distribution(request):
+    """Employee distribution by shift type."""
+    shifts = []
+
+    try:
+        data = (
+            _scoped_employees(request)
+            .exclude(employee_work_info__shift_id__isnull=True)
+            .values(
+                "employee_work_info__shift_id",
+                "employee_work_info__shift_id__employee_shift",
+            )
+            .annotate(count=Count("id"))
+            .order_by("-count")
+        )
+
+        for item in data:
+            shift = item["employee_work_info__shift_id__employee_shift"]
+            shift_id = item["employee_work_info__shift_id"]
+            if shift:
+                shifts.append(
+                    {"shift": shift, "shift_id": shift_id, "count": item["count"]}
+                )
+    except Exception:
+        pass
+
+    return JsonResponse({"shifts": shifts})
+
+
+@login_required
+def attendance_work_type_distribution(request):
+    """Employee distribution by work type (remote, on-site, hybrid, etc.)."""
+    work_types = []
+    employees = _scoped_employees(request)
+
+    try:
+        data = (
+            employees.exclude(employee_work_info__work_type_id__isnull=True)
+            .values(
+                "employee_work_info__work_type_id",
+                "employee_work_info__work_type_id__work_type",
+            )
+            .annotate(count=Count("id"))
+            .order_by("-count")
+        )
+
+        for item in data:
+            wt = item["employee_work_info__work_type_id__work_type"]
+            wt_id = item["employee_work_info__work_type_id"]
+            if wt:
+                work_types.append(
+                    {"work_type": wt, "work_type_id": wt_id, "count": item["count"]}
+                )
+
+        # Count employees with no work type assigned
+        no_wt = employees.filter(
+            employee_work_info__work_type_id__isnull=True,
+        ).count()
+        if no_wt > 0:
+            work_types.append(
+                {"work_type": _("Not Assigned"), "work_type_id": None, "count": no_wt}
+            )
+    except Exception:
+        pass
+
+    return JsonResponse({"work_types": work_types})
