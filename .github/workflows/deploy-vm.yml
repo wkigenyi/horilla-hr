@@ -1,0 +1,74 @@
+# Deploy production Compose stack on a VM via SSH.
+#
+# On every push to the deploy branch, Actions SSHs in, resets the clone to
+# the pushed commit, and runs scripts/deploy-prod.sh (make prod + health wait).
+# .env and docker-compose.override.yml stay on the VM; this workflow never
+# uploads them.
+#
+# One-time setup: see docker/README.md → "Deploy via GitHub Actions".
+
+name: Deploy VM
+
+on:
+  push:
+    branches:
+      - "2.0"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-vm
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Require deploy secrets
+        env:
+          VM_HOST: ${{ secrets.VM_HOST }}
+          VM_USER: ${{ secrets.VM_USER }}
+          VM_SSH_KEY: ${{ secrets.VM_SSH_KEY }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          set -euo pipefail
+          missing=
+          for name in VM_HOST VM_USER VM_SSH_KEY DEPLOY_PATH; do
+            eval "val=\${$name:-}"
+            if [ -z "$val" ]; then
+              missing="${missing} ${name}"
+            fi
+          done
+          if [ -n "$missing" ]; then
+            echo "Missing required Actions secrets:$missing" >&2
+            echo "See docker/README.md (Deploy via GitHub Actions)." >&2
+            exit 1
+          fi
+
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          port: ${{ secrets.VM_PORT || 22 }}
+          # First boot / migrate+collectstatic can take several minutes.
+          command_timeout: 40m
+          script_stop: true
+          envs: DEPLOY_PATH,DEPLOY_SHA,DEPLOY_BRANCH
+          script: |
+            set -euo pipefail
+            cd "$DEPLOY_PATH"
+            # Bring the tree to this commit first so scripts/deploy-prod.sh
+            # is the version from the push (needed on the first CI deploy
+            # after adding the script, and keeps manual/old trees honest).
+            git fetch --prune origin
+            git reset --hard "$DEPLOY_SHA"
+            export DEPLOY_SHA
+            export DEPLOY_BRANCH
+            bash ./scripts/deploy-prod.sh
+        env:
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_SHA: ${{ github.sha }}
+          DEPLOY_BRANCH: ${{ vars.DEPLOY_BRANCH || '2.0' }}

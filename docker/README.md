@@ -12,6 +12,7 @@ A complete, step-by-step guide to running Horilla HR using Docker. Covers develo
 4. [Configuration Reference](#4-configuration-reference)
 5. [Development Workflow](#5-development-workflow)
 6. [Production Deployment](#6-production-deployment)
+   - [Deploy via GitHub Actions](#deploy-via-github-actions)
 7. [Database Management](#7-database-management)
 8. [Static & Media Files](#8-static--media-files)
 9. [Scaling & Performance](#9-scaling--performance)
@@ -362,6 +363,50 @@ curl http://localhost:8000/ready/
 
 # Check logs for errors
 docker compose logs --tail=50 web
+```
+
+### Deploy via GitHub Actions
+
+Pushing to the deploy branch (default **`2.0`**) runs [`.github/workflows/deploy-vm.yml`](../.github/workflows/deploy-vm.yml): GitHub Actions SSHs into your VM, resets the git clone to that commit, and runs [`scripts/deploy-prod.sh`](../scripts/deploy-prod.sh) (`make prod` + wait for `web` healthy). Migrations and `collectstatic` still run in `entrypoint.sh` on container start.
+
+**Not managed by CI:** `.env` and `docker-compose.override.yml` stay only on the VM. Never put production secrets in the workflow.
+
+#### One-time VM setup
+
+1. Clone this repo on the VM and configure production as in Steps 1–2 above (`.env`, optional `docker-compose.override.yml`, working `make prod`).
+2. Deploy user can run `docker` / `docker compose` and `make` (e.g. membership in the `docker` group).
+3. The clone can `git fetch` from GitHub (HTTPS credential, SSH deploy key, or similar).
+4. Create a **CI-only** SSH key pair on your laptop (do not reuse your personal key):
+
+```bash
+ssh-keygen -t ed25519 -f horilla-deploy -C "github-actions-deploy" -N ""
+```
+
+5. Append `horilla-deploy.pub` to the deploy user’s `~/.ssh/authorized_keys` on the VM.
+6. Keep `horilla-deploy` (private) for the GitHub secret below; do not commit it.
+
+#### GitHub Actions secrets and variables
+
+Repo **Settings → Secrets and variables → Actions**:
+
+| Name | Type | Purpose |
+|------|------|---------|
+| `VM_HOST` | Secret | VM hostname or IP |
+| `VM_USER` | Secret | SSH user |
+| `VM_SSH_KEY` | Secret | Contents of the private key (`horilla-deploy`) |
+| `VM_PORT` | Secret | Optional; SSH port (default `22`) |
+| `DEPLOY_PATH` | Secret | Absolute path to the clone on the VM |
+| `DEPLOY_BRANCH` | Variable | Optional; branch that deploys (default `2.0`) |
+
+`workflow_dispatch` on **Deploy VM** redeploys the current tip of the workflow’s configured branch without a new push.
+
+#### Manual deploy on the VM
+
+```bash
+cd /path/to/horilla-hr
+DEPLOY_SHA=<commit> bash ./scripts/deploy-prod.sh
+# or track the branch tip:
+DEPLOY_BRANCH=2.0 bash ./scripts/deploy-prod.sh
 ```
 
 ---
