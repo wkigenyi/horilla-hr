@@ -1,0 +1,33 @@
+---
+description: Imara fork — keep HTMX UI intact and stay rebase-friendly vs upstream 2.0
+alwaysApply: true
+---
+
+# Imara fork constraints
+
+This fork serves React (Imara) **and** must remain a clean rebase onto upstream `2.0`.
+
+## Do not break the HTMX reference UI
+
+- React consumes **`horilla_api`** (DRF JSON / JWT). HTMX uses session Django views that return HTML fragments.
+- Do **not** change HTMX view contracts (HTML partials, redirects, `@hx_request_required`, messages/toasts) to suit React.
+- Prefer a **parallel API** endpoint or serializer. Extract shared helpers (querysets, permission checks) if both need the same logic.
+- Never turn an HTMX view into JSON-only, or regress the fragment path with Accept-header branching unless upstream already does that.
+
+```text
+✅ Add/adjust horilla_api/... + tests
+✅ Small shared helper used by API and (unchanged) HTML view
+❌ Rewrite base/views.py / templates so React can parse them
+```
+
+## Stay rebase-friendly against `2.0`
+
+- Prefer **new files** under `horilla_api/` (views, urls, tests) over large edits to upstream modules.
+- When touching a shared upstream file, keep the diff **minimal and local** — no reformat, rename, or drive-by cleanup.
+- Keep fork-only deploy/CI (`deploy-vm.yml`, `imara` branch triggers, VM secrets docs that are fork-specific) out of anything intended for upstream `2.0`.
+- Avoid editing the same hotspots upstream churns often unless there is no API-only alternative.
+
+## Check before finishing
+
+1. Would the classic Horilla UI still behave the same for this feature?
+2. Could this diff apply cleanly on top of a fresher `2.0` without fighting unrelated hunks?
