@@ -3,6 +3,12 @@ from django.urls import path
 from ...api_views.dashboard.views import EssDashboardWidgetAPIView
 from ...api_views.employee import views as views
 from ...api_views.employee.admin_reset_password import AdminResetPasswordAPIView
+from ...api_views.employee.profile_tabs import (
+    EmployeeHistoryAPIView,
+    EmployeeMailLogAPIView,
+    EmployeeNotesAPIView,
+    EmployeeWorkShiftAPIView,
+)
 
 urlpatterns = [
     path(
@@ -21,6 +27,27 @@ urlpatterns = [
         AdminResetPasswordAPIView.as_view(),
         name="api-employee-admin-reset-password",
     ),
+    path(
+        "employees/<int:employee_id>/notes/",
+        EmployeeNotesAPIView.as_view(),
+        name="api-employee-notes",
+    ),
+    path(
+        "employees/<int:employee_id>/mail-log/",
+        EmployeeMailLogAPIView.as_view(),
+        name="api-employee-mail-log",
+    ),
+    path(
+        "employees/<int:employee_id>/history/",
+        EmployeeHistoryAPIView.as_view(),
+        name="api-employee-history",
+    ),
+    path(
+        "employees/<int:employee_id>/work-shift/",
+        EmployeeWorkShiftAPIView.as_view(),
+        name="api-employee-work-shift",
+    ),
+
     path(
         "employee-type/<int:pk>",
         views.EmployeeTypeAPIView.as_view(),
