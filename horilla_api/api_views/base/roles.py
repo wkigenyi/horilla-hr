@@ -1,9 +1,11 @@
 """
-Roles and direct employee permissions for a superuser.
+Roles and direct employee permissions.
 
 Roles are Django auth groups. Direct permissions are the user's own
-``user_permissions``, separate from anything a role grants. The web settings
-page at ``/settings/user-group-view/`` is the same data.
+``user_permissions``, separate from anything a role grants. A person's own
+roles, and anyone who can view employees, can read the role names. Changing
+roles or direct permissions stays superuser-only. The web settings page at
+``/settings/user-group-view/`` is the same data.
 """
 
 from django.conf import settings
@@ -201,6 +203,24 @@ def _active_employee(employee_id):
     )
 
 
+def _may_view_employee_access(request, employee):
+    """Role names are visible to the person, to anyone who can view employees,
+    and to a superuser. Changing them stays superuser-only."""
+    user = request.user
+    if not user.is_authenticated:
+        return False
+    if user.is_superuser or user.has_perm("employee.view_employee"):
+        return True
+    return getattr(employee, "employee_user_id_id", None) == user.pk
+
+
+def _employee_roles(user):
+    return [
+        {"id": group.id, "name": group.name}
+        for group in user.groups.all().order_by("name")
+    ]
+
+
 class RoleListAPIView(APIView):
     permission_classes = [IsAuthenticated, SuperuserOnly]
 
@@ -349,22 +369,35 @@ class RolePeopleAPIView(APIView):
 
 
 class EmployeePermissionsAPIView(APIView):
-    permission_classes = [IsAuthenticated, SuperuserOnly]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request, employee_id):
         employee = _active_employee(employee_id)
         user = getattr(employee, "employee_user_id", None) if employee else None
         if user is None:
             return Response({"detail": "Employee not found."}, status=404)
+        if not _may_view_employee_access(request, employee):
+            return Response(
+                {"detail": "You do not have permission to view this."}, status=403
+            )
         return Response(
             {
                 "id": employee.id,
                 "name": employee.get_full_name(),
-                "permissions": _assigned_ids(user.user_permissions.all()),
+                "roles": _employee_roles(user),
+                "permissions": (
+                    _assigned_ids(user.user_permissions.all())
+                    if request.user.is_superuser
+                    else []
+                ),
             }
         )
 
     def put(self, request, employee_id):
+        if not request.user.is_superuser:
+            return Response(
+                {"detail": "You do not have permission to change this."}, status=403
+            )
         employee = _active_employee(employee_id)
         user = getattr(employee, "employee_user_id", None) if employee else None
         if user is None:
