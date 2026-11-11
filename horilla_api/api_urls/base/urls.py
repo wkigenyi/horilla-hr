@@ -1,6 +1,6 @@
 from django.urls import path, re_path
 
-from ...api_views.base import preferences, roles, views
+from ...api_views.base import integrations, preferences, roles, views
 
 urlpatterns = [
     path(
@@ -260,6 +260,16 @@ urlpatterns = [
         "system-preferences/",
         preferences.SystemPreferencesAPIView.as_view(),
         name="api-system-preferences",
+    ),
+    path(
+        "integrations/",
+        integrations.IntegrationListAPIView.as_view(),
+        name="api-integrations",
+    ),
+    path(
+        "integrations/<slug:app_label>/",
+        integrations.IntegrationDetailAPIView.as_view(),
+        name="api-integration-detail",
     ),
     path(
         "color-themes/",
