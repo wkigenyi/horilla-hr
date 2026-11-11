@@ -2,6 +2,7 @@ from django.urls import path
 
 from ...api_views.dashboard.views import EssDashboardWidgetAPIView
 from ...api_views.employee import views as views
+from ...api_views.employee.admin_reset_password import AdminResetPasswordAPIView
 
 urlpatterns = [
     path(
@@ -14,6 +15,11 @@ urlpatterns = [
         "employees/<int:pk>/",
         views.EmployeeAPIView.as_view(),
         name="api-employee-detail",
+    ),
+    path(
+        "employees/<int:employee_id>/reset-password/",
+        AdminResetPasswordAPIView.as_view(),
+        name="api-employee-admin-reset-password",
     ),
     path(
         "employee-type/<int:pk>",
