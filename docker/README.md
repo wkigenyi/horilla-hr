@@ -367,7 +367,7 @@ docker compose logs --tail=50 web
 
 ### Deploy via GitHub Actions
 
-Pushing to the deploy branch (default **`2.0`**) runs [`.github/workflows/deploy-vm.yml`](../.github/workflows/deploy-vm.yml): GitHub Actions SSHs into your VM, resets the git clone to that commit, and runs [`scripts/deploy-prod.sh`](../scripts/deploy-prod.sh) (`make prod` + wait for `web` healthy). Migrations and `collectstatic` still run in `entrypoint.sh` on container start.
+Pushing to the deploy branch (**`imara`** in this fork) runs [`.github/workflows/deploy-vm.yml`](../.github/workflows/deploy-vm.yml): GitHub Actions SSHs into your VM, resets the git clone to that commit, and runs [`scripts/deploy-prod.sh`](../scripts/deploy-prod.sh) (`make prod` + wait for `web` healthy). Migrations and `collectstatic` still run in `entrypoint.sh` on container start. The workflow is scoped to `imara` so upstream `2.0` stays free of this deploy trigger.
 
 **Not managed by CI:** `.env` and `docker-compose.override.yml` stay only on the VM. Never put production secrets in the workflow.
 
@@ -396,7 +396,7 @@ Repo **Settings → Secrets and variables → Actions**:
 | `VM_SSH_KEY` | Secret | Contents of the private key (`horilla-deploy`) |
 | `VM_PORT` | Secret | Optional; SSH port (default `22`) |
 | `DEPLOY_PATH` | Secret | Absolute path to the clone on the VM |
-| `DEPLOY_BRANCH` | Variable | Optional; branch that deploys (default `2.0`) |
+| `DEPLOY_BRANCH` | Variable | Optional; branch that deploys (default `imara`) |
 
 `workflow_dispatch` on **Deploy VM** redeploys the current tip of the workflow’s configured branch without a new push.
 
@@ -406,7 +406,7 @@ Repo **Settings → Secrets and variables → Actions**:
 cd /path/to/horilla-hr
 DEPLOY_SHA=<commit> bash ./scripts/deploy-prod.sh
 # or track the branch tip:
-DEPLOY_BRANCH=2.0 bash ./scripts/deploy-prod.sh
+DEPLOY_BRANCH=imara bash ./scripts/deploy-prod.sh
 ```
 
 ---

@@ -12,7 +12,8 @@ name: Deploy VM
 on:
   push:
     branches:
-      - "2.0"
+      # Fork deploy branch — keep upstream 2.0 free of this trigger.
+      - "imara"
   workflow_dispatch:
 
 concurrency:
@@ -71,4 +72,4 @@ jobs:
         env:
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
           DEPLOY_SHA: ${{ github.sha }}
-          DEPLOY_BRANCH: ${{ vars.DEPLOY_BRANCH || '2.0' }}
+          DEPLOY_BRANCH: ${{ vars.DEPLOY_BRANCH || 'imara' }}
