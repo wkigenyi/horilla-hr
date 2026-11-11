@@ -65,5 +65,11 @@ while true; do
   [[ -n "$web_id" ]] || die "web container disappeared while waiting"
 done
 
+# nginx resolves `web` once at start. make prod often recreates web with a
+# new Compose IP while leaving nginx running, so upstream stays on the dead
+# address (connect() failed 111 → 502). Recreate nginx after web is healthy.
+log "Recreating nginx so it re-resolves web"
+"${compose[@]}" up -d --force-recreate --no-deps nginx
+
 "${compose[@]}" ps
 log "Deploy finished successfully"

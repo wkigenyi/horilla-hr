@@ -27,7 +27,16 @@ This fork serves React (Imara) **and** must remain a clean rebase onto upstream 
 - Keep fork-only deploy/CI (`deploy-vm.yml`, `imara` branch triggers, VM secrets docs that are fork-specific) out of anything intended for upstream `2.0`.
 - Avoid editing the same hotspots upstream churns often unless there is no API-only alternative.
 
+## Restart after backend changes
+
+When a request changes this backend (API, Django views, settings, urls), **restart the running app** before considering the work done so the process loads the new code:
+
+- Prefer `docker restart horilla-hr-web-1` (and `horilla-hr-scheduler-1` if scheduler-relevant).
+- If the image must be rebuilt (Dockerfile / deps / no source bind-mount), use `make prod` instead of a plain restart.
+- Do this after tests pass for that request; do not leave a stale gunicorn/workers process serving old code.
+
 ## Check before finishing
 
 1. Would the classic Horilla UI still behave the same for this feature?
 2. Could this diff apply cleanly on top of a fresher `2.0` without fighting unrelated hunks?
+3. Has the local/server process been restarted (or rebuilt) so the new backend is live?

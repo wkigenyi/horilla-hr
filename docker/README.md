@@ -409,6 +409,15 @@ DEPLOY_SHA=<commit> bash ./scripts/deploy-prod.sh
 DEPLOY_BRANCH=imara bash ./scripts/deploy-prod.sh
 ```
 
+After `make prod` recreates `web`, Compose nginx can keep a stale upstream IP
+and return 502 until it is recreated. `scripts/deploy-prod.sh` force-recreates
+`nginx` once `web` is healthy. Manual recovery:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.override.yml \
+  up -d --force-recreate --no-deps nginx
+```
+
 ---
 
 ## 7. Database Management
