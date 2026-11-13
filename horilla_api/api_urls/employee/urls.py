@@ -3,6 +3,7 @@ from django.urls import path
 from ...api_views.dashboard.views import EssDashboardWidgetAPIView
 from ...api_views.employee import views as views
 from ...api_views.employee.admin_reset_password import AdminResetPasswordAPIView
+from ...api_views.employee.family import EmployeeFamilyAPIView
 from ...api_views.employee.profile_tabs import (
     EmployeeHistoryAPIView,
     EmployeeMailLogAPIView,
@@ -26,6 +27,16 @@ urlpatterns = [
         "employees/<int:employee_id>/reset-password/",
         AdminResetPasswordAPIView.as_view(),
         name="api-employee-admin-reset-password",
+    ),
+    path(
+        "employees/<int:employee_id>/family/",
+        EmployeeFamilyAPIView.as_view(),
+        name="api-employee-family",
+    ),
+    path(
+        "employees/<int:employee_id>/family/<int:pk>/",
+        EmployeeFamilyAPIView.as_view(),
+        name="api-employee-family-detail",
     ),
     path(
         "employees/<int:employee_id>/notes/",

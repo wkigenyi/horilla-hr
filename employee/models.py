@@ -1545,6 +1545,110 @@ class DisciplinaryAction(HorillaModel):
         return url
 
 
+class EmployeeFamilyMember(HorillaModel):
+    """
+    A person related to an employee. Relation is a closed list; "Other"
+    carries a free-text label in ``relation_other``.
+    """
+
+    RELATION_SPOUSE = "spouse"
+    RELATION_CHILD = "child"
+    RELATION_PARENT = "parent"
+    RELATION_SIBLING = "sibling"
+    RELATION_GUARDIAN = "guardian"
+    RELATION_GRANDPARENT = "grandparent"
+    RELATION_GRANDCHILD = "grandchild"
+    RELATION_OTHER = "other"
+    RELATION_CHOICES = (
+        (RELATION_SPOUSE, _("Spouse")),
+        (RELATION_CHILD, _("Child")),
+        (RELATION_PARENT, _("Parent")),
+        (RELATION_SIBLING, _("Sibling")),
+        (RELATION_GUARDIAN, _("Guardian")),
+        (RELATION_GRANDPARENT, _("Grandparent")),
+        (RELATION_GRANDCHILD, _("Grandchild")),
+        (RELATION_OTHER, _("Other")),
+    )
+
+    employee = models.ForeignKey(
+        Employee,
+        on_delete=models.CASCADE,
+        related_name="family_members",
+        verbose_name=_("Employee"),
+    )
+    first_name = models.CharField(max_length=200, verbose_name=_("First Name"))
+    last_name = models.CharField(
+        max_length=200, null=True, blank=True, verbose_name=_("Last Name")
+    )
+    relation = models.CharField(
+        max_length=20, choices=RELATION_CHOICES, verbose_name=_("Relation")
+    )
+    relation_other = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        verbose_name=_("Other Relation"),
+    )
+    gender = models.CharField(
+        max_length=10,
+        null=True,
+        blank=True,
+        choices=Employee.choice_gender,
+        verbose_name=_("Gender"),
+    )
+    date_of_birth = models.DateField(
+        null=True, blank=True, verbose_name=_("Date of Birth")
+    )
+    phone = models.CharField(
+        max_length=25,
+        null=True,
+        blank=True,
+        validators=[phone_validator],
+        verbose_name=_("Phone"),
+    )
+    alternative_phone = models.CharField(
+        max_length=25,
+        null=True,
+        blank=True,
+        validators=[phone_validator],
+        verbose_name=_("Alternative Phone"),
+    )
+    email = models.EmailField(max_length=254, null=True, blank=True)
+    address = models.TextField(max_length=200, null=True, blank=True)
+    objects = HorillaCompanyManager(
+        related_company_field="employee__employee_work_info__company_id"
+    )
+
+    class Meta:
+        verbose_name = _("Family Member")
+        verbose_name_plural = _("Family Members")
+        ordering = ["-id"]
+
+    def __str__(self):
+        name = self.first_name
+        if self.last_name:
+            name = f"{name} {self.last_name}"
+        return f"{name} ({self.get_relation_display()})"
+
+    def clean(self):
+        super().clean()
+        other = (self.relation_other or "").strip()
+        if self.relation == self.RELATION_OTHER:
+            if not other:
+                raise ValidationError(
+                    {"relation_other": _("Specify the relation.")}
+                )
+            self.relation_other = other
+        else:
+            # The free-text label only applies to Other. Drop it so a later
+            # change of relation cannot leave a stale description behind.
+            self.relation_other = ""
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        super().save(*args, **kwargs)
+
+
 class EmployeeGeneralSetting(HorillaModel):
     """
     EmployeeGeneralSetting
