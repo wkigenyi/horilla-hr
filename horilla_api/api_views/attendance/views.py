@@ -1153,11 +1153,17 @@ class OfflineEmployeeMailsend(APIView):
         )
         render_bdy = template_bdy.render(context)
 
+        work_email = getattr(
+            getattr(employee, "employee_work_info", None), "email", None
+        )
+        if not work_email:
+            return Response(f"Email not set for {employee.get_full_name()}")
+
         email = EmailMessage(
             subject,
             render_bdy,
             host,
-            [employee.employee_work_info.email],
+            [work_email],
         )
         email.content_subtype = "html"
 

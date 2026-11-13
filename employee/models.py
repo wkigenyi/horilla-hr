@@ -98,8 +98,10 @@ class Employee(models.Model):
     employee_profile = models.ImageField(
         upload_to=upload_path, null=True, blank=True, verbose_name=_("Profile Image")
     )
-    email = models.EmailField(max_length=254, unique=True)
-    phone = models.CharField(max_length=25, validators=[phone_validator])
+    email = models.EmailField(max_length=254, unique=True, null=True, blank=True)
+    phone = models.CharField(
+        max_length=25, null=True, blank=True, validators=[phone_validator]
+    )
     address = models.TextField(max_length=200, blank=True, null=True)
     country = models.CharField(max_length=100, blank=True, null=True)
     state = models.CharField(max_length=100, null=True, blank=True)
@@ -270,12 +272,13 @@ class Employee(models.Model):
 
     def get_mail(self):
         """
-        This method is used to return the employee's email, checking work email first
-        then falling back to personal email.
+        Work email, then personal email. None when both are blank, so callers
+        can skip sending instead of building a message with an empty recipient.
         """
         work_info = getattr(self, "employee_work_info", None)
-        work_email = getattr(work_info, "email", None)
-        return work_email if work_email is not None else self.email
+        work_email = (getattr(work_info, "email", None) or "").strip() or None
+        personal = (self.email or "").strip() or None
+        return work_email or personal
 
     def get_email(self):
         return self.get_mail()
@@ -745,8 +748,11 @@ class Employee(models.Model):
         """
         from base.models import EmailLog
 
+        address = self.get_mail()
+        if not address:
+            return None
         return (
-            EmailLog.objects.filter(to__icontains=self.get_mail())
+            EmailLog.objects.filter(to__icontains=address)
             .order_by("-created_at")
             .first()
         )
@@ -824,6 +830,10 @@ class Employee(models.Model):
                 )
 
     def save(self, *args, **kwargs):
+        # Unique allows many NULLs and only one empty string. Blank contact
+        # fields are stored as NULL so more than one employee can have none.
+        self.email = (self.email or "").strip() or None
+        self.phone = (self.phone or "").strip() or None
         self.full_clean()
         super().save(*args, **kwargs)
 
@@ -834,8 +844,9 @@ class Employee(models.Model):
         employee = self
 
         if employee.employee_user_id is None:
-            # Create user if no corresponding user exists
-            username = self.email
+            # Create user if no corresponding user exists. Sign-in name is the
+            # email when they have one, otherwise the badge ID.
+            username = (self.email or "").strip() or (self.badge_id or "").strip()
             password = generate_random_password()
 
             # The email is unique among Employees, but an unrelated
@@ -843,18 +854,20 @@ class Employee(models.Model):
             # orphaned account left behind by a deleted employee. Fall back
             # to a random username rather than crashing on the uniqueness
             # constraint; email stays the real address either way.
-            if HorillaUser.objects.filter(username=username).exists():
+            # HorillaUser.email is not nullable, so a missing address is "".
+            if not username or HorillaUser.objects.filter(username=username).exists():
                 username = generate_unique_fallback_username()
 
+            user_email = self.email or ""
             user = HorillaUser.objects.create_user(
                 username=username,
-                email=self.email,
+                email=user_email,
                 password=password,
                 is_new_employee=True,
             )
             if not user:
                 user = HorillaUser.objects.create_user(
-                    username=username, email=self.email, password=password
+                    username=username, email=user_email, password=password
                 )
             self.employee_user_id = user
             # default permissions

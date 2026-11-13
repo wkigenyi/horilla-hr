@@ -1238,7 +1238,9 @@ def send_otp(request):
     if not employee:
         return redirect("/login/")
 
-    email = employee.get_mail()
+    address = employee.get_mail()
+    if not address:
+        return redirect("/")
     email_backend = ConfiguredEmailBackend()
     display_email_name = email_backend.dynamic_from_email_with_display_name
 
@@ -1247,7 +1249,7 @@ def send_otp(request):
         subject="Your OTP Code",
         body=f"Your OTP code is {otp_code}",
         from_email=display_email_name,
-        to=[email],
+        to=[address],
     )
     thread = threading.Thread(target=email.send)
     thread.start()

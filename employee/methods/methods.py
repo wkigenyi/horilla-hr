@@ -310,9 +310,20 @@ def process_employee_records(
         save = True
         gender = emp.get("Gender")
 
-        email = str(emp.get("Email", "")).strip().lower()
-        raw_phone = emp.get("Phone", "")
-        phone = normalize_phone(raw_phone)
+        raw_email = emp.get("Email")
+        if raw_email is None or pd.isna(raw_email):
+            email = ""
+        else:
+            email = str(raw_email).strip().lower()
+        raw_phone = emp.get("Phone")
+        if (
+            raw_phone is None
+            or pd.isna(raw_phone)
+            or str(raw_phone).strip() == ""
+        ):
+            phone = ""
+        else:
+            phone = normalize_phone(raw_phone)
         badge_id = clean_badge_id(emp.get("Badge ID"))
         first_name = emp.get("First Name")
         last_name = emp.get("Last Name")
@@ -346,8 +357,8 @@ def process_employee_records(
             )
             save = False
 
-        # Email validation
-        if not email or not email_regex.match(email):
+        # Email is optional. A value that is present still has to be a real address.
+        if email and not email_regex.match(email):
             errors["Email Error"] = "Invalid email address."
             save = False
 
@@ -356,8 +367,14 @@ def process_employee_records(
             errors["First Name Error"] = "First name cannot be empty."
             save = False
 
-        # Phone validation
-        if not phone_regex.match(phone):
+        # Phone is optional. A filled-in cell still has to match the pattern,
+        # including one that normalizes to no digits.
+        phone_missing = (
+            raw_phone is None
+            or pd.isna(raw_phone)
+            or str(raw_phone).strip() == ""
+        )
+        if not phone_missing and (not phone or not phone_regex.match(phone)):
             errors["Phone Error"] = "Invalid phone number format."
             save = False
 
@@ -376,22 +393,23 @@ def process_employee_records(
             emp["Badge ID"] = badge_id
             seen_badge_ids.add(badge_id)
 
-        # Username/email uniqueness
-        if email in seen_usernames:
-            errors["User ID Error"] = "User with this email already exists."
-            save = False
-        else:
-            seen_usernames.add(email)
+        # Username/email uniqueness. With no email the sign-in name is the
+        # badge ID, which is checked on its own above.
+        if email:
+            if email in seen_usernames:
+                errors["User ID Error"] = "User with this email already exists."
+                save = False
+            else:
+                seen_usernames.add(email)
 
-        # Name+email uniqueness
-        name_email_tuple = (first_name, last_name, email)
-        if name_email_tuple in seen_name_emails:
-            errors["Name and Email Error"] = (
-                "This employee already exists in the system."
-            )
-            save = False
-        else:
-            seen_name_emails.add(name_email_tuple)
+            name_email_tuple = (first_name, last_name, email)
+            if name_email_tuple in seen_name_emails:
+                errors["Name and Email Error"] = (
+                    "This employee already exists in the system."
+                )
+                save = False
+            else:
+                seen_name_emails.add(name_email_tuple)
 
         # Gender validation
         if gender and gender not in allowed_genders:
@@ -447,7 +465,10 @@ def process_employee_records(
 
         # Final processing
         if save:
-            emp["Phone"] = phone
+            # bulk_create skips Employee.save(), so blank contact is NULL here.
+            if not email:
+                emp["Email"] = None
+            emp["Phone"] = phone or None
             emp["Date Joining"] = joining_date
             emp["Contract End Date"] = contract_end_date
             success_list.append(emp)
@@ -459,6 +480,11 @@ def process_employee_records(
     return success_list, error_list, created_count
 
 
+def _import_username(row):
+    """Sign-in name for an import row: the sheet's username, else email, else badge ID."""
+    return row.get("Username") or row.get("Email") or row.get("Badge ID")
+
+
 def bulk_create_user_import(success_lists):
     """
     Creates new HorillaUser instances in bulk from a list of dictionaries containing user data.
@@ -468,7 +494,7 @@ def bulk_create_user_import(success_lists):
     """
     # A row may carry its own "Username" and "Password"; without them the email
     # is the username and the password is set afterwards.
-    emails = [row.get("Username") or row["Email"] for row in success_lists]
+    emails = [_import_username(row) for row in success_lists]
     existing_usernames = (
         set(
             HorillaUser.objects.filter(username__in=emails).values_list(
@@ -488,18 +514,19 @@ def bulk_create_user_import(success_lists):
 
     users_to_create = [
         HorillaUser(
-            username=row.get("Username") or row["Email"],
-            email=row["Email"],
+            username=_import_username(row),
+            # HorillaUser.email is not nullable; a missing address is "".
+            email=row.get("Email") or "",
             password=(
                 (row.get("__hash") or make_password(row["Password"]))
                 if row.get("Password")
-                else str(row["Phone"]).strip()
+                else str(row.get("Phone") or "").strip()
             ),
             is_superuser=False,
             is_new_employee=True,
         )
         for row in success_lists
-        if (row.get("Username") or row["Email"]) not in existing_usernames
+        if _import_username(row) not in existing_usernames
     ]
 
     created_users = []
@@ -516,7 +543,7 @@ def bulk_create_employee_import(success_lists):
     Creates Employee instances in bulk based on imported data.
     Uses adaptive chunking for compatibility with SQLite, avoids chunking in PostgreSQL.
     """
-    emails = [row.get("Username") or row["Email"] for row in success_lists]
+    emails = [_import_username(row) for row in success_lists]
     is_postgres = connection.vendor == "postgresql"
 
     existing_users = {
@@ -533,17 +560,17 @@ def bulk_create_employee_import(success_lists):
 
     employees_to_create = [
         Employee(
-            employee_user_id=existing_users[row.get("Username") or row["Email"]],
+            employee_user_id=existing_users[_import_username(row)],
             badge_id=row.get("Badge ID"),
             employee_first_name=row.get("First Name"),
             employee_last_name=row.get("Last Name"),
             address=row.get("Address"),
-            email=row.get("Email"),
-            phone=row.get("Phone"),
+            email=row.get("Email") or None,
+            phone=row.get("Phone") or None,
             gender=row.get("Gender").lower() if row.get("Gender") else None,
         )
         for row in success_lists
-        if (row.get("Username") or row["Email"]) in existing_users
+        if _import_username(row) in existing_users
     ]
 
     created_employees = []

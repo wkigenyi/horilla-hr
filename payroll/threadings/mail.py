@@ -59,6 +59,9 @@ class MailSendThread(Thread):
                     )
                 )
             employee = record["instances"][0].employee_id
+            address = employee.get_mail()
+            if not address:
+                continue
             email_backend = ConfiguredEmailBackend()
             display_email_name = email_backend.dynamic_from_email_with_display_name
             if self.request:
@@ -71,7 +74,7 @@ class MailSendThread(Thread):
                 f"Hello, {record['instances'][0].get_name()} Your Payslips is Ready!",
                 html_message,
                 display_email_name,
-                [employee.get_mail()],
+                [address],
                 reply_to=[display_email_name],
             )
             email.attachments = attachments

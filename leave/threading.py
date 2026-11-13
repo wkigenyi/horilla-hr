@@ -77,6 +77,9 @@ class LeaveMailSendThread(Thread):
         for recipient in recipients:
             if not recipient:
                 continue
+            address = recipient.get_mail()
+            if not address:
+                continue
 
             company = recipient.get_company()
 
@@ -97,7 +100,7 @@ class LeaveMailSendThread(Thread):
                 subject=subject,
                 body=html_message,
                 from_email=display_email_name,
-                to=[recipient.get_mail()],
+                to=[address],
                 reply_to=[display_email_name],
             )
 

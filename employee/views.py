@@ -4508,7 +4508,9 @@ def employee_get_mail_log(request, pk=None):
     if not employee:
         messages.error(request, _("Employee not found."))
         return HorillaRedirect(request)
-    tracked_mails = EmailLog.objects.filter(to__icontains=employee.email)
+    tracked_mails = EmailLog.objects.none()
+    if employee.email:
+        tracked_mails = EmailLog.objects.filter(to__icontains=employee.email)
     try:
         if employee.employee_work_info and employee.employee_work_info.email:
             tracked_mails = tracked_mails | EmailLog.objects.filter(

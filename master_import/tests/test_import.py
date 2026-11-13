@@ -146,6 +146,46 @@ class EmployeeCheckTests(TestCase):
         rows[0]["Email"] = None
         self.assertEqual(EMPLOYEES.prepare(rows, Context())[0]["Username"], "E-1")
 
+    def test_a_row_without_email_or_phone_is_valid_and_signs_in_by_badge_id(self):
+        rows = rows_for(
+            {"Work Email": None, "Mobile": None},
+            {
+                "Employee ID": "E-2",
+                "Work Email": None,
+                "Mobile": None,
+                "Full Name": "Maya Chen",
+            },
+        )
+        result = self.check(rows)
+        self.assertEqual(result.errors, [])
+        self.assertEqual(
+            [row["Username"] for row in result.valid],
+            ["E-1", "E-2"],
+        )
+        self.assertIsNone(result.valid[0]["Email"])
+        self.assertIsNone(result.valid[0]["Phone"])
+        for row in result.valid:
+            row["Password"] = "Str0ng-Pass#9421"
+
+        EMPLOYEES.commit(result.valid, Context())
+        created = Employee.objects.entire().get(badge_id="E-1")
+        self.assertIsNone(created.email)
+        self.assertIsNone(created.phone)
+        self.assertEqual(created.employee_user_id.username, "E-1")
+        self.assertEqual(created.employee_user_id.email, "")
+
+    def test_a_duplicate_email_is_still_rejected(self):
+        company = make_company("Acme Ltd")
+        make_employee(company=company, email="maya.chen@acme.test")
+        result = self.check(rows_for())
+        self.assertEqual(len(result.errors), 1)
+        self.assertIn("email", " ".join(result.errors[0]["messages"]).lower())
+
+    def test_a_bad_phone_is_still_an_error(self):
+        result = self.check(rows_for({"Mobile": "abc"}))
+        self.assertEqual(len(result.errors), 1)
+        self.assertIn("phone", " ".join(result.errors[0]["messages"]).lower())
+
     def test_a_username_in_the_sheet_is_used_and_must_be_unique(self):
         result = self.check(
             rows_for(
@@ -587,6 +627,17 @@ class UpdateModeTests(TestCase):
         job.refresh_from_db()
         self.assertEqual(job.summary["mode"], "update")
         self.assertEqual(job.summary["imported"], 1)
+
+    def test_a_blank_phone_on_update_is_left_alone(self):
+        job = self.run_update(
+            [{"Badge ID": "E-1", "Location": "Austin", "Phone": None}]
+        )
+        data = self.check(job)
+        self.assertEqual(data["error_count"], 0)
+        self.client.post(reverse("master-import-run", args=[job.pk]))
+        maya = Employee.objects.entire().get(pk=self.maya.pk)
+        self.assertEqual(maya.phone, "9876543210")
+        self.assertEqual(maya.employee_work_info.location, "Austin")
 
     def test_a_row_that_finds_nobody_is_an_error_not_a_new_person(self):
         job = self.run_update([{"Badge ID": "NOPE", "Location": "Austin"}])

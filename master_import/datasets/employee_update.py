@@ -265,8 +265,11 @@ class EmployeeUpdater:
             if new is None:
                 continue
             if label == "Phone":
+                # A blank cell leaves the phone as it is, the same as a blank email.
+                if not str(new).strip():
+                    continue
                 new = normalize_phone(new)
-                if not PHONE.match(new):
+                if not new or not PHONE.match(new):
                     errors["Phone Error"] = "Invalid phone number format."
                     continue
                 if label in match_keys:

@@ -491,6 +491,11 @@ class TwoFactorAuthMiddleware:
             try:
                 if ConfiguredEmailBackend().configuration is not None:
                     if hasattr(request, "user") and request.user.is_authenticated:
+                        employee = getattr(request.user, "employee_get", None)
+                        # No address to send a code to: don't trap the session
+                        # on the OTP page.
+                        if employee is not None and not employee.get_mail():
+                            return self.get_response(request)
                         if not request.session.get("otp_code_verified", False):
                             return redirect("/two-factor")
                 else:

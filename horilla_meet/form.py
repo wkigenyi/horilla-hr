@@ -24,10 +24,16 @@ class GoogleMeetingForm(ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        employees = [
-            (emp.get_mail(), emp.get_full_name()) for emp in Employee.objects.all()
-        ]
-        candidates = [(cand.get_mail(), cand.name) for cand in Candidate.objects.all()]
+        employees = []
+        for emp in Employee.objects.all():
+            mail = emp.get_mail()
+            if mail:
+                employees.append((mail, emp.get_full_name()))
+        candidates = []
+        for cand in Candidate.objects.all():
+            mail = cand.get_mail()
+            if mail:
+                candidates.append((mail, cand.name))
 
         self.fields["attendees"].choices = [
             ("Employees", employees),

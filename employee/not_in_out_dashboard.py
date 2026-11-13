@@ -307,11 +307,14 @@ def send_mail_to_employee(request):
             {"instance": employee, "self": request.user.employee_get}
         )
         render_bdy = template_bdy.render(context)
-        send_to_mail = (
-            employee.employee_work_info.email
-            if employee.employee_work_info and employee.employee_work_info.email
-            else employee.email
-        )
+        send_to_mail = employee.get_mail()
+        if not send_to_mail:
+            messages.info(
+                request,
+                _("Email not set for %(employee)s")
+                % {"employee": employee.get_full_name()},
+            )
+            continue
 
         email = EmailMessage(
             subject=subject,

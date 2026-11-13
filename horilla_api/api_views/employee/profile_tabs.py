@@ -138,13 +138,21 @@ class EmployeeMailLogAPIView(APIView):
         if not mail_log_accessibility(request, employee):
             return _forbidden()
 
-        query = Q(to__icontains=employee.email)
+        parts = []
+        if employee.email:
+            parts.append(Q(to__icontains=employee.email))
         work_email = getattr(
             getattr(employee, "employee_work_info", None), "email", None
         )
         if work_email:
-            query |= Q(to__icontains=work_email)
-        logs = EmailLog.objects.filter(query).order_by("-created_at")
+            parts.append(Q(to__icontains=work_email))
+        if not parts:
+            logs = EmailLog.objects.none()
+        else:
+            query = parts[0]
+            for part in parts[1:]:
+                query |= part
+            logs = EmailLog.objects.filter(query).order_by("-created_at")
         rows = [
             {
                 "id": log.id,

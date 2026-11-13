@@ -78,14 +78,20 @@ class MailLogTabList(HorillaListView):
         queryset = super().get_queryset()
         pk = self.kwargs.get("pk")
         employee = Employee.objects.get(id=pk)
-        query_filter = Q(to__icontains=employee.email)
-        queryset = queryset.filter(to__icontains=employee.email)
-        if employee.employee_work_info and employee.employee_work_info.email:
-            query_filter |= Q(to__icontains=employee.employee_work_info.email)
-            queryset = queryset.filter(query_filter)
-            queryset = queryset.order_by("-created_at")
-
-        return queryset
+        addresses = []
+        if employee.email:
+            addresses.append(employee.email)
+        work_email = getattr(
+            getattr(employee, "employee_work_info", None), "email", None
+        )
+        if work_email:
+            addresses.append(work_email)
+        if not addresses:
+            return queryset.none()
+        query_filter = Q()
+        for address in addresses:
+            query_filter |= Q(to__icontains=address)
+        return queryset.filter(query_filter).order_by("-created_at")
 
     columns = [
         (_("Subject"), "subject_display"),
