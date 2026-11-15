@@ -323,6 +323,9 @@ PAYROLL_WIDGETS = {
     "reimbursement": payroll_dashboard.payroll_reimbursement_summary,
     "salary-dist": payroll_dashboard.payroll_salary_distribution,
     "components": payroll_dashboard.payroll_component_breakdown,
+    "pending-requests": payroll_dashboard.payroll_pending_requests_by_type,
+    "contribution-cost": payroll_dashboard.payroll_contribution_cost,
+    "run-coverage": payroll_dashboard.payroll_run_coverage,
 }
 
 

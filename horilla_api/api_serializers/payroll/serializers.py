@@ -1,8 +1,10 @@
 import math
 
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
+from base.models import Department, JobPosition, JobRole
 from employee.models import BonusPoint, Employee
 from leave.models import LeaveType
 from payroll.models.models import (
@@ -94,6 +96,60 @@ class MultipleConditionSerializer(serializers.ModelSerializer):
         fields = "__all__"
 
 
+_COMPONENT_M2M = (
+    "specific_employees",
+    "exclude_employees",
+    "other_conditions",
+    "apply_conditions",
+    "apply_departments",
+    "apply_job_positions",
+    "apply_job_roles",
+)
+
+
+def _check_apply_by(attrs):
+    by = attrs.get("apply_by") or "employees"
+    if by == "employees":
+        return
+    field = {
+        "department": "apply_departments",
+        "job_position": "apply_job_positions",
+        "job_role": "apply_job_roles",
+    }.get(by)
+    if field and not attrs.get(field):
+        raise serializers.ValidationError(
+            {"apply_by": [_("Choose at least one group to apply it to.")]}
+        )
+    attrs["include_active_employees"] = False
+
+
+def _save_component(model, validated_data, instance=None):
+    present = [name for name in _COMPONENT_M2M if name in validated_data]
+    relations = {name: validated_data.pop(name) for name in present}
+    if instance is None:
+        instance = model(**validated_data)
+    else:
+        for name, value in validated_data.items():
+            setattr(instance, name, value)
+    try:
+        instance.full_clean()
+    except DjangoValidationError as exc:
+        if getattr(exc, "message_dict", None):
+            raise serializers.ValidationError(
+                {
+                    key: [str(item) for item in value]
+                    for key, value in exc.message_dict.items()
+                }
+            )
+        raise serializers.ValidationError(
+            {"detail": [str(message) for message in exc.messages]}
+        )
+    instance.save()
+    for name, value in relations.items():
+        getattr(instance, name).set(value or [])
+    return instance
+
+
 class AllowanceSerializer(serializers.ModelSerializer):
     specific_employees = serializers.PrimaryKeyRelatedField(
         queryset=Employee.objects.all(), many=True, required=False
@@ -104,25 +160,33 @@ class AllowanceSerializer(serializers.ModelSerializer):
     other_conditions = serializers.PrimaryKeyRelatedField(
         queryset=MultipleCondition.objects.all(), many=True, required=False
     )
+    apply_departments = serializers.PrimaryKeyRelatedField(
+        queryset=Department.objects.all(), many=True, required=False
+    )
+    apply_job_positions = serializers.PrimaryKeyRelatedField(
+        queryset=JobPosition.objects.all(), many=True, required=False
+    )
+    apply_job_roles = serializers.PrimaryKeyRelatedField(
+        queryset=JobRole.objects.all(), many=True, required=False
+    )
 
     class Meta:
         model = Allowance
         fields = "__all__"
-        read_only_fields = ["id", "company_id", "only_show_under_employee", "is_loan"]
+        read_only_fields = [
+            "id",
+            "company_id",
+            "only_show_under_employee",
+            "is_loan",
+            "is_system",
+            "system_key",
+        ]
 
     def create(self, validated_data):
-        specific_employees = validated_data.pop("specific_employees", [])
-        exclude_employees = validated_data.pop("exclude_employees", [])
-        other_conditions = validated_data.pop("other_conditions", [])
+        return _save_component(Allowance, validated_data)
 
-        allowance = Allowance.objects.create(**validated_data)
-
-        # Set the ManyToMany relationships after the instance is created
-        allowance.specific_employees.set(specific_employees)
-        allowance.exclude_employees.set(exclude_employees)
-        allowance.other_conditions.set(other_conditions)
-
-        return allowance
+    def update(self, instance, validated_data):
+        return _save_component(Allowance, validated_data, instance=instance)
 
     def validate(self, data):
         is_fixed = data.get("is_fixed")
@@ -176,14 +240,48 @@ class AllowanceSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 _("If 'has_max_limit' is True, 'maximum_amount' is required.")
             )
-
+        _check_apply_by(data)
         return data
 
 
 class DeductionSerializer(serializers.ModelSerializer):
+    specific_employees = serializers.PrimaryKeyRelatedField(
+        queryset=Employee.objects.all(), many=True, required=False
+    )
+    exclude_employees = serializers.PrimaryKeyRelatedField(
+        queryset=Employee.objects.all(), many=True, required=False
+    )
+    apply_departments = serializers.PrimaryKeyRelatedField(
+        queryset=Department.objects.all(), many=True, required=False
+    )
+    apply_job_positions = serializers.PrimaryKeyRelatedField(
+        queryset=JobPosition.objects.all(), many=True, required=False
+    )
+    apply_job_roles = serializers.PrimaryKeyRelatedField(
+        queryset=JobRole.objects.all(), many=True, required=False
+    )
+
     class Meta:
         model = Deduction
         fields = "__all__"
+        read_only_fields = [
+            "id",
+            "company_id",
+            "only_show_under_employee",
+            "is_system",
+            "system_key",
+        ]
+
+    def validate(self, data):
+        data = super().validate(data)
+        _check_apply_by(data)
+        return data
+
+    def create(self, validated_data):
+        return _save_component(Deduction, validated_data)
+
+    def update(self, instance, validated_data):
+        return _save_component(Deduction, validated_data, instance=instance)
 
 
 class LoanAccountSerializer(serializers.ModelSerializer):

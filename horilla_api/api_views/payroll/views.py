@@ -28,6 +28,7 @@ from payroll.models.models import (
     Contract,
     Deduction,
     LoanAccount,
+    PayrollBatch,
     Payslip,
     Reimbursement,
     ReimbursementrequestComment,
@@ -130,10 +131,27 @@ class PayslipView(APIView):
         valid = _payslip_status_choices()
         if status not in valid:
             return Response({"status": [_("Invalid status.")]}, status=400)
+        if payslip.status_locked and status != payslip.status:
+            return Response({"status": [payslip.status_lock_message]}, status=400)
         payslip.status = status
         payslip.save(update_fields=["status"])
         serializer = PayslipSerializer(payslip)
         return Response(serializer.data, status=200)
+
+    @method_decorator(permission_required("payroll.delete_payslip"))
+    def delete(self, request, id):
+        payslip = Payslip.objects.filter(id=id).first()
+        if payslip is None:
+            return Response({"detail": _("Payslip not found.")}, status=404)
+        if payslip.status == "paid" or payslip.status_locked:
+            message = (
+                payslip.status_lock_message
+                if payslip.status_locked
+                else _("A paid payslip cannot be deleted.")
+            )
+            return Response({"detail": message}, status=400)
+        payslip.delete()
+        return Response({"status": "deleted"}, status=200)
 
 
 class PayslipBulkStatusView(APIView):
@@ -151,10 +169,15 @@ class PayslipBulkStatusView(APIView):
         if status not in valid:
             return Response({"status": [_("Invalid status.")]}, status=400)
         slips = Payslip.objects.filter(id__in=ids)
-        updated = slips.update(status=status)
+        locked = slips.filter(
+            payroll_batch__status__in=PayrollBatch.PAYSLIP_STATUS_LOCKED
+        )
+        skipped = locked.count()
+        updated = slips.exclude(pk__in=locked.values("pk")).update(status=status)
         return Response(
             {
                 "updated": updated,
+                "skipped": skipped,
                 "status": status,
                 "message": _("%(count)s payslips updated.") % {"count": updated},
             },
@@ -370,11 +393,16 @@ class AllowanceView(APIView):
 
     @method_decorator(permission_required("payroll.view_allowance"))
     def get(self, request, pk=None):
+        visible = Allowance.objects.exclude(is_system=True).exclude(
+            only_show_under_employee=True
+        )
         if pk:
-            allowance = Allowance.objects.get(id=pk)
+            allowance = visible.filter(id=pk).first()
+            if allowance is None:
+                return Response({"detail": _("Allowance not found.")}, status=404)
             serializer = AllowanceSerializer(instance=allowance)
             return Response(serializer.data, status=200)
-        allowance = Allowance.objects.all()
+        allowance = visible
         filter_queryset = AllowanceFilter(request.GET, allowance).qs
         pagination = HorillaPageNumberPagination()
         page = pagination.paginate_queryset(filter_queryset, request)
@@ -391,7 +419,14 @@ class AllowanceView(APIView):
 
     @method_decorator(permission_required("payroll.change_allowance"))
     def put(self, request, pk):
-        contract = Allowance.objects.get(id=pk)
+        contract = (
+            Allowance.objects.exclude(is_system=True)
+            .exclude(only_show_under_employee=True)
+            .filter(id=pk)
+            .first()
+        )
+        if contract is None:
+            return Response({"detail": _("Allowance not found.")}, status=404)
         serializer = AllowanceSerializer(instance=contract, data=request.data)
         if serializer.is_valid():
             serializer.save()
@@ -400,7 +435,14 @@ class AllowanceView(APIView):
 
     @method_decorator(permission_required("payroll.delete_allowance"))
     def delete(self, request, pk):
-        contract = Allowance.objects.get(id=pk)
+        contract = (
+            Allowance.objects.exclude(is_system=True)
+            .exclude(only_show_under_employee=True)
+            .filter(id=pk)
+            .first()
+        )
+        if contract is None:
+            return Response({"detail": _("Allowance not found.")}, status=404)
         contract.delete()
         return Response({"status": "deleted"}, status=200)
 
@@ -410,11 +452,16 @@ class DeductionView(APIView):
 
     @method_decorator(permission_required("payroll.view_deduction"))
     def get(self, request, pk=None):
+        visible = Deduction.objects.exclude(is_system=True).exclude(
+            only_show_under_employee=True
+        )
         if pk:
-            deduction = Deduction.objects.get(id=pk)
+            deduction = visible.filter(id=pk).first()
+            if deduction is None:
+                return Response({"detail": _("Deduction not found.")}, status=404)
             serializer = DeductionSerializer(instance=deduction)
             return Response(serializer.data, status=200)
-        deduction = Deduction.objects.all()
+        deduction = visible
         filter_queryset = DeductionFilter(request.GET, deduction).qs
         pagination = HorillaPageNumberPagination()
         page = pagination.paginate_queryset(filter_queryset, request)
@@ -431,7 +478,14 @@ class DeductionView(APIView):
 
     @method_decorator(permission_required("payroll.change_deduction"))
     def put(self, request, pk):
-        contract = Deduction.objects.get(id=pk)
+        contract = (
+            Deduction.objects.exclude(is_system=True)
+            .exclude(only_show_under_employee=True)
+            .filter(id=pk)
+            .first()
+        )
+        if contract is None:
+            return Response({"detail": _("Deduction not found.")}, status=404)
         serializer = DeductionSerializer(instance=contract, data=request.data)
         if serializer.is_valid():
             serializer.save()
@@ -440,7 +494,14 @@ class DeductionView(APIView):
 
     @method_decorator(permission_required("payroll.delete_deduction"))
     def delete(self, request, pk):
-        contract = Deduction.objects.get(id=pk)
+        contract = (
+            Deduction.objects.exclude(is_system=True)
+            .exclude(only_show_under_employee=True)
+            .filter(id=pk)
+            .first()
+        )
+        if contract is None:
+            return Response({"detail": _("Deduction not found.")}, status=404)
         contract.delete()
         return Response({"status": "deleted"}, status=200)
 
