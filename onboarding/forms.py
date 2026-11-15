@@ -395,6 +395,7 @@ class EmployeeCreationForm(ModelForm):
             "is_directly_converted",
             "national_id",
             "tax_id",
+            "nssf_id",
         )
         widgets = {
             "dob": DateInput(attrs={"type": "date"}),

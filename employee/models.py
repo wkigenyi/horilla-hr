@@ -148,6 +148,13 @@ class Employee(models.Model):
         unique=True,
         verbose_name=_("Tax ID"),
     )
+    nssf_id = models.CharField(
+        max_length=32,
+        null=True,
+        blank=True,
+        unique=True,
+        verbose_name=_("NSSF ID"),
+    )
     is_active = models.BooleanField(default=True)
     additional_info = models.JSONField(null=True, blank=True)
     is_from_onboarding = models.BooleanField(
@@ -852,6 +859,7 @@ class Employee(models.Model):
         # statutory id is stored as NULL so more than one employee can have none.
         self.national_id = (self.national_id or "").strip() or None
         self.tax_id = (self.tax_id or "").strip() or None
+        self.nssf_id = (self.nssf_id or "").strip() or None
         self.full_clean()
         super().save(*args, **kwargs)
 

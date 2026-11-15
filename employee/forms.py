@@ -224,6 +224,7 @@ class EmployeeForm(ModelForm):
             # the classic personal-info screen.
             "national_id",
             "tax_id",
+            "nssf_id",
         )
         widgets = {
             "dob": TextInput(attrs={"type": "date", "id": "dob"}),

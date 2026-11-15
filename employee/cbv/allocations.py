@@ -231,6 +231,7 @@ class PersonalForm(ModelForm):
             "is_active",
             "national_id",
             "tax_id",
+            "nssf_id",
         ]
 
 

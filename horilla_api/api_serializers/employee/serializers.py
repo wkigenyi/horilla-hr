@@ -141,8 +141,8 @@ class EmployeeSelfSerializer(serializers.ModelSerializer):
 
     Deliberately absent, and HR-owned: ``email`` (unique, and what
     notifications key off), ``employee_first_name``/``employee_last_name``
-    (identity), ``national_id``, ``tax_id``, ``badge_id``, ``is_active``,
-    ``additional_info``, and the onboarding provenance flags.
+    (identity), ``national_id``, ``tax_id``, ``nssf_id``, ``badge_id``,
+    ``is_active``, ``additional_info``, and the onboarding provenance flags.
     """
 
     class Meta:

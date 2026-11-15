@@ -197,6 +197,7 @@ _SENSITIVE_KEY_PARTS = (
     "ssn",
     "social_security",
     "tax_id",
+    "nssf",
     "phone",
     "address",
     "ifsc",

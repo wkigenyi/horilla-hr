@@ -45,24 +45,29 @@ class EmployeeStatutoryIdTests(TestCase):
         other.refresh_from_db()
         self.assertIsNone(self.employee.national_id)
         self.assertIsNone(self.employee.tax_id)
+        self.assertIsNone(self.employee.nssf_id)
         self.assertIsNone(other.national_id)
         self.assertIsNone(other.tax_id)
+        self.assertIsNone(other.nssf_id)
 
     def test_self_cannot_set_tax_id(self):
         response = self.client.put(
             employee_url(self.employee),
-            {"tax_id": "TIN-SELF", "phone": "5551234567"},
+            {"tax_id": "TIN-SELF", "nssf_id": "NSSF-SELF", "phone": "5551234567"},
             format="json",
         )
         self.assertEqual(response.status_code, 200, response.content)
         self.employee.refresh_from_db()
         self.assertIsNone(self.employee.tax_id)
+        self.assertIsNone(self.employee.nssf_id)
         self.assertEqual(self.employee.phone, "5551234567")
         detail = self.client.get(employee_url(self.employee))
         self.assertEqual(detail.status_code, 200, detail.content)
         self.assertIn("tax_id", detail.data)
         self.assertIsNone(detail.data["tax_id"])
         self.assertIn("national_id", detail.data)
+        self.assertIn("nssf_id", detail.data)
+        self.assertIsNone(detail.data["nssf_id"])
 
     def test_directory_omits_statutory_ids(self):
         response = self.client.get("/api/v1/employee/list/employees/")
@@ -71,6 +76,7 @@ class EmployeeStatutoryIdTests(TestCase):
         for row in response.data["results"]:
             self.assertNotIn("national_id", row)
             self.assertNotIn("tax_id", row)
+            self.assertNotIn("nssf_id", row)
 
     def test_hr_can_set_tax_id_and_duplicates_are_rejected(self):
         hr = make_user("identity_hr")
@@ -110,6 +116,43 @@ class EmployeeStatutoryIdTests(TestCase):
         self.assertEqual(cleared.status_code, 200, cleared.content)
         self.employee.refresh_from_db()
         self.assertIsNone(self.employee.tax_id)
+
+    def test_hr_can_set_nssf_id_and_duplicates_are_rejected(self):
+        hr = make_user("identity_nssf_hr")
+        make_employee(
+            company=self.company,
+            email="identity-nssf-hr@test.horilla",
+            first_name="Nia",
+            user=hr,
+        )
+        hr.user_permissions.add(Permission.objects.get(codename="change_employee"))
+        hr_client = APIClient()
+        hr_client.force_authenticate(user=hr)
+
+        response = hr_client.put(
+            employee_url(self.employee), {"nssf_id": "NSSF-1"}, format="json"
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.employee.refresh_from_db()
+        self.assertEqual(self.employee.nssf_id, "NSSF-1")
+
+        other = make_employee(
+            company=self.company,
+            email="identity-nssf-dup@test.horilla",
+            first_name="Ned",
+        )
+        duplicate = hr_client.put(
+            employee_url(other), {"nssf_id": "NSSF-1"}, format="json"
+        )
+        self.assertEqual(duplicate.status_code, 400, duplicate.content)
+        self.assertIn("nssf_id", duplicate.data)
+
+        cleared = hr_client.put(
+            employee_url(self.employee), {"nssf_id": ""}, format="json"
+        )
+        self.assertEqual(cleared.status_code, 200, cleared.content)
+        self.employee.refresh_from_db()
+        self.assertIsNone(self.employee.nssf_id)
 
 
 class EmployeeIdentifierAPITests(TestCase):
