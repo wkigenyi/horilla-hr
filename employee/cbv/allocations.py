@@ -229,6 +229,8 @@ class PersonalForm(ModelForm):
             "employee_user_id",
             "additional_info",
             "is_active",
+            "national_id",
+            "tax_id",
         ]
 
 

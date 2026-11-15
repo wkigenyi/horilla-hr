@@ -4,6 +4,7 @@ from ...api_views.dashboard.views import EssDashboardWidgetAPIView
 from ...api_views.employee import views as views
 from ...api_views.employee.admin_reset_password import AdminResetPasswordAPIView
 from ...api_views.employee.family import EmployeeFamilyAPIView
+from ...api_views.employee.identifiers import EmployeeIdentifierAPIView
 from ...api_views.employee.profile_tabs import (
     EmployeeHistoryAPIView,
     EmployeeMailLogAPIView,
@@ -37,6 +38,16 @@ urlpatterns = [
         "employees/<int:employee_id>/family/<int:pk>/",
         EmployeeFamilyAPIView.as_view(),
         name="api-employee-family-detail",
+    ),
+    path(
+        "employees/<int:employee_id>/identifiers/",
+        EmployeeIdentifierAPIView.as_view(),
+        name="api-employee-identifiers",
+    ),
+    path(
+        "employees/<int:employee_id>/identifiers/<int:pk>/",
+        EmployeeIdentifierAPIView.as_view(),
+        name="api-employee-identifier-detail",
     ),
     path(
         "employees/<int:employee_id>/notes/",

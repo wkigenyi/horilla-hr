@@ -134,6 +134,20 @@ class Employee(models.Model):
         blank=True,
         verbose_name=_("Emergency Contact Relation"),
     )
+    national_id = models.CharField(
+        max_length=32,
+        null=True,
+        blank=True,
+        unique=True,
+        verbose_name=_("National ID"),
+    )
+    tax_id = models.CharField(
+        max_length=32,
+        null=True,
+        blank=True,
+        unique=True,
+        verbose_name=_("Tax ID"),
+    )
     is_active = models.BooleanField(default=True)
     additional_info = models.JSONField(null=True, blank=True)
     is_from_onboarding = models.BooleanField(
@@ -834,6 +848,10 @@ class Employee(models.Model):
         # fields are stored as NULL so more than one employee can have none.
         self.email = (self.email or "").strip() or None
         self.phone = (self.phone or "").strip() or None
+        # Unique allows many NULLs and only one empty string. A missing
+        # statutory id is stored as NULL so more than one employee can have none.
+        self.national_id = (self.national_id or "").strip() or None
+        self.tax_id = (self.tax_id or "").strip() or None
         self.full_clean()
         super().save(*args, **kwargs)
 
@@ -1643,6 +1661,97 @@ class EmployeeFamilyMember(HorillaModel):
             # The free-text label only applies to Other. Drop it so a later
             # change of relation cannot leave a stale description behind.
             self.relation_other = ""
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        super().save(*args, **kwargs)
+
+
+class EmployeeIdentifier(HorillaModel):
+    """
+    An identity document other than National ID and Tax ID. Those two are
+    single columns on Employee. A passport or licence is renewed, so it is a row.
+    """
+
+    TYPE_PASSPORT = "passport"
+    TYPE_DRIVING_LICENCE = "driving_licence"
+    TYPE_BIRTH_CERTIFICATE = "birth_certificate"
+    TYPE_RESIDENCE_PERMIT = "residence_permit"
+    TYPE_WORK_PERMIT = "work_permit"
+    TYPE_OTHER = "other"
+    TYPE_CHOICES = (
+        (TYPE_PASSPORT, _("Passport")),
+        (TYPE_DRIVING_LICENCE, _("Driving licence")),
+        (TYPE_BIRTH_CERTIFICATE, _("Birth certificate")),
+        (TYPE_RESIDENCE_PERMIT, _("Residence permit")),
+        (TYPE_WORK_PERMIT, _("Work permit")),
+        (TYPE_OTHER, _("Other")),
+    )
+
+    employee = models.ForeignKey(
+        Employee,
+        on_delete=models.CASCADE,
+        related_name="identifiers",
+        verbose_name=_("Employee"),
+    )
+    document_type = models.CharField(
+        max_length=32, choices=TYPE_CHOICES, verbose_name=_("Document Type")
+    )
+    document_type_other = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        verbose_name=_("Other Document Type"),
+    )
+    document_number = models.CharField(max_length=64, verbose_name=_("Document Number"))
+    issuing_authority = models.CharField(
+        max_length=200, null=True, blank=True, verbose_name=_("Issuing Authority")
+    )
+    issue_date = models.DateField(null=True, blank=True, verbose_name=_("Issue Date"))
+    expiry_date = models.DateField(null=True, blank=True, verbose_name=_("Expiry Date"))
+    objects = HorillaCompanyManager(
+        related_company_field="employee__employee_work_info__company_id"
+    )
+
+    class Meta:
+        verbose_name = _("Identity Document")
+        verbose_name_plural = _("Identity Documents")
+        ordering = ["-id"]
+
+    def __str__(self):
+        return f"{self.get_document_type_display()} {self.document_number}"
+
+    def clean(self):
+        super().clean()
+        other = (self.document_type_other or "").strip()
+        if self.document_type == self.TYPE_OTHER:
+            if not other:
+                raise ValidationError(
+                    {"document_type_other": _("Specify the document type.")}
+                )
+            self.document_type_other = other
+        else:
+            self.document_type_other = ""
+        number = (self.document_number or "").strip()
+        if not number:
+            raise ValidationError(
+                {"document_number": _("Enter the document number.")}
+            )
+        self.document_number = number
+        authority = (self.issuing_authority or "").strip()
+        self.issuing_authority = authority or None
+        if (
+            self.issue_date
+            and self.expiry_date
+            and self.expiry_date < self.issue_date
+        ):
+            raise ValidationError(
+                {
+                    "expiry_date": _(
+                        "Expiry date cannot be before the issue date."
+                    )
+                }
+            )
 
     def save(self, *args, **kwargs):
         self.clean()

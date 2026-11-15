@@ -220,6 +220,10 @@ class EmployeeForm(ModelForm):
             "is_from_onboarding",
             "is_directly_converted",
             "is_active",
+            # React edits these. Leaving them on this form would add them to
+            # the classic personal-info screen.
+            "national_id",
+            "tax_id",
         )
         widgets = {
             "dob": TextInput(attrs={"type": "date", "id": "dob"}),
