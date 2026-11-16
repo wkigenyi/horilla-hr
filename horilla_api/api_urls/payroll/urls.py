@@ -9,6 +9,11 @@ from horilla_api.api_views.payroll.adjustments import (
     PayAdjustmentStatusView,
     PayAdjustmentView,
 )
+from horilla_api.api_views.payroll.accounting import (
+    AccountingExportView,
+    AccountingGLMappingView,
+    AccountingSummaryView,
+)
 from horilla_api.api_views.payroll.configure import (
     ComponentCodeView,
     ComponentFormulaPreviewView,
@@ -222,6 +227,21 @@ urlpatterns = [
     ),
     path("tax-pack/", TaxPackView.as_view(), name="api-tax-pack"),
     path("currency/", CurrencySettingsView.as_view(), name="api-payroll-currency"),
+    path(
+        "accounting/gl-mappings/",
+        AccountingGLMappingView.as_view(),
+        name="api-payroll-accounting-gl-mappings",
+    ),
+    path(
+        "accounting/summary/",
+        AccountingSummaryView.as_view(),
+        name="api-payroll-accounting-summary",
+    ),
+    path(
+        "accounting/export/",
+        AccountingExportView.as_view(),
+        name="api-payroll-accounting-export",
+    ),
     path("contribution/", ContributionView.as_view(), name="api-contribution"),
     path(
         "contribution/<int:component_id>/",

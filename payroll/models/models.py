@@ -4918,3 +4918,4 @@ from payroll.models.payroll_batch import (  # noqa: E402,F401
     PayrollBatch,
     PayrollBatchLine,
 )
+from payroll.models.accounting_gl import PayrollGLMapping  # noqa: E402,F401

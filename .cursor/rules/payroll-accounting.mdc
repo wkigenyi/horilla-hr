@@ -1,0 +1,17 @@
+---
+description: Payroll is computation + export; no GL inside Horilla
+alwaysApply: false
+globs:
+  - payroll/**/*
+  - horilla_api/**/payroll/**/*
+---
+
+# Payroll and accounting
+
+Horilla/Imara does **not** keep a chart of accounts or post journals. It computes payroll figures. Accounting systems consume those figures (export later).
+
+The agreed reportable lines live in [`payroll/accounting_components.py`](payroll/accounting_components.py). Rolling payslips into those lines is [`payroll/methods/accounting_report.py`](payroll/methods/accounting_report.py). The summary grain is **department × catalog line**; employees with no department roll into Unassigned.
+
+Company GL codes live on [`PayrollGLMapping`](payroll/models/accounting_gl.py) keyed by catalog `line_key`. API: `/api/v1/payroll/accounting/gl-mappings/`, `summary/`, `export/` (CSV). Unmapped lines still export with an empty `gl_code`.
+
+Do not add GL posting, Bigcapital sync, or a COA model unless a later plan explicitly asks for it.
