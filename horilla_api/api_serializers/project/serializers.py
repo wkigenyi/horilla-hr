@@ -2,11 +2,63 @@
 horilla_api/api_serializers/project/serializers.py
 """
 
+from datetime import date, datetime
+
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import models as dj_models
+from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
 from base.models import Company
 from employee.models import Employee
 from project.models import Project, ProjectStage, Task, TimeSheet
+
+
+def _validation_error(exc):
+    if getattr(exc, "message_dict", None):
+        raise serializers.ValidationError(
+            {
+                key: [str(item) for item in value]
+                for key, value in exc.message_dict.items()
+            }
+        )
+    raise serializers.ValidationError(
+        {"detail": [str(message) for message in exc.messages]}
+    )
+
+
+def _save_model(model, validated_data, instance=None, m2m_names=()):
+    """Assign fields, run Model.clean(), then save.
+
+    Serializer.save() skips clean(), so the API was accepting dates and
+    membership the classic forms reject.
+    """
+    relations = {
+        name: validated_data.pop(name) for name in m2m_names if name in validated_data
+    }
+    if instance is None:
+        instance = model(**validated_data)
+    else:
+        for name, value in validated_data.items():
+            setattr(instance, name, value)
+    # DateField(default=timezone.now) leaves a datetime on the instance until
+    # save(). TimeSheet.clean() compares that value to a date.
+    for field in instance._meta.fields:
+        if isinstance(field, dj_models.DateTimeField) or not isinstance(
+            field, dj_models.DateField
+        ):
+            continue
+        value = getattr(instance, field.name)
+        if isinstance(value, datetime):
+            setattr(instance, field.name, value.date())
+    try:
+        instance.full_clean()
+    except DjangoValidationError as exc:
+        _validation_error(exc)
+    instance.save()
+    for name, value in relations.items():
+        getattr(instance, name).set(value or [])
+    return instance
 
 
 class ProjectStageSerializer(serializers.ModelSerializer):
@@ -30,6 +82,12 @@ class ProjectStageSerializer(serializers.ModelSerializer):
             }
         return None
 
+    def create(self, validated_data):
+        return _save_model(ProjectStage, validated_data)
+
+    def update(self, instance, validated_data):
+        return _save_model(ProjectStage, validated_data, instance)
+
 
 class ProjectSerializer(serializers.ModelSerializer):
     managers = serializers.SerializerMethodField()
@@ -46,8 +104,11 @@ class ProjectSerializer(serializers.ModelSerializer):
         source="company_id",
         write_only=True,
         required=False,
+        allow_null=True,
+        default=None,
     )
     project_stages = ProjectStageSerializer(many=True, read_only=True)
+    task_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Project
@@ -76,6 +137,18 @@ class ProjectSerializer(serializers.ModelSerializer):
                 "company": obj.company_id.company,
             }
         return None
+
+    def get_task_count(self, obj):
+        annotated = getattr(obj, "task_count", None)
+        if annotated is not None:
+            return annotated
+        return obj.task_set.count()
+
+    def create(self, validated_data):
+        return _save_model(Project, validated_data, m2m_names=("managers",))
+
+    def update(self, instance, validated_data):
+        return _save_model(Project, validated_data, instance, m2m_names=("managers",))
 
 
 class TaskSerializer(serializers.ModelSerializer):
@@ -109,6 +182,8 @@ class TaskSerializer(serializers.ModelSerializer):
         write_only=True,
         required=False,
     )
+    allocated_seconds = serializers.IntegerField(read_only=True)
+    timesheet_spent_seconds = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Task
@@ -160,6 +235,50 @@ class TaskSerializer(serializers.ModelSerializer):
             ]
         return []
 
+    def validate(self, attrs):
+        project = attrs.get("project", getattr(self.instance, "project", None))
+        stage = attrs.get("stage", getattr(self.instance, "stage", None))
+        if (
+            stage is not None
+            and project is not None
+            and stage.project_id != project.id
+        ):
+            raise serializers.ValidationError(
+                {"stage_id": [_("Stage does not belong to this project.")]}
+            )
+        if self.instance is not None and self.instance.end_date:
+            if self.instance.end_date < date.today():
+                status = attrs.get("status", self.instance.status)
+                next_stage = attrs.get("stage", self.instance.stage)
+                stage_changed = (
+                    next_stage is not None
+                    and next_stage.id != self.instance.stage_id
+                )
+                if status != self.instance.status or stage_changed:
+                    raise serializers.ValidationError(
+                        {
+                            "status": [
+                                _("Cannot update status. Task has already expired.")
+                            ]
+                        }
+                    )
+        return attrs
+
+    def create(self, validated_data):
+        return _save_model(
+            Task,
+            validated_data,
+            m2m_names=("task_managers", "task_members"),
+        )
+
+    def update(self, instance, validated_data):
+        return _save_model(
+            Task,
+            validated_data,
+            instance,
+            m2m_names=("task_managers", "task_members"),
+        )
+
 
 class TimeSheetSerializer(serializers.ModelSerializer):
     project_id = serializers.SerializerMethodField()
@@ -210,3 +329,9 @@ class TimeSheetSerializer(serializers.ModelSerializer):
                 "get_full_name": obj.employee_id.get_full_name(),
             }
         return None
+
+    def create(self, validated_data):
+        return _save_model(TimeSheet, validated_data)
+
+    def update(self, instance, validated_data):
+        return _save_model(TimeSheet, validated_data, instance)

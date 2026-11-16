@@ -115,6 +115,8 @@ PROJECT_WIDGETS = {
     "top": project_dashboard.project_top_active,
     "contributors": project_dashboard.project_top_contributors,
     "deadlines": project_dashboard.project_task_deadlines,
+    "task-kpi": project_dashboard.project_task_kpi_data,
+    "timesheet": project_dashboard.project_timesheet_trend,
 }
 
 
