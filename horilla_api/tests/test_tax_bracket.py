@@ -55,3 +55,24 @@ class TaxBracketApiTests(TestCase):
         self.assertIsNone(response.data["max_income"])
         stored = TaxBracket.objects.get(id=response.data["id"])
         self.assertTrue(math.isinf(stored.max_income))
+
+    def test_update_changes_the_rate_and_keeps_an_open_top_band(self):
+        bracket = TaxBracket.objects.create(
+            filing_status_id=self.filing,
+            min_income=0,
+            max_income=math.inf,
+            tax_rate=10,
+        )
+
+        response = self.client.put(
+            f"/api/v1/payroll/tax-bracket/{bracket.id}",
+            {"tax_rate": 15, "max_income": None},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.data["tax_rate"], 15)
+        self.assertIsNone(response.data["max_income"])
+        bracket.refresh_from_db()
+        self.assertEqual(bracket.tax_rate, 15)
+        self.assertTrue(math.isinf(bracket.max_income))

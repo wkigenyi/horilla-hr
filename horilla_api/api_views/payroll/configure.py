@@ -1,10 +1,9 @@
 """Payroll configuration the classic settings screens expose, as JSON."""
 
-import json
 from datetime import date
 
 from django.core.exceptions import ValidationError
-from django.db.models import Sum
+from django.db.models import ProtectedError, Sum
 from django.utils.translation import gettext as _
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -52,7 +51,10 @@ from payroll.views.component_formula_views import (
     sample_context,
 )
 from payroll.views.contract_components import _rows_for
-from payroll.views.salary_structure_preview import preview_salary_structure
+from payroll.views.salary_structure_preview import (
+    build_salary_structure_preview,
+    parse_preview_inputs,
+)
 
 from .common import (
     as_id_list,
@@ -246,14 +248,6 @@ class SalaryStructureDuplicateView(APIView):
         return Response(_structure_payload(copy, detail=True), status=201)
 
 
-class _Post:
-    def __init__(self, data):
-        self._data = {key: "" if value is None else str(value) for key, value in data.items()}
-
-    def get(self, name, default=None):
-        return self._data.get(name, default)
-
-
 class SalaryStructurePreviewView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -261,12 +255,24 @@ class SalaryStructurePreviewView(APIView):
         blocked = require_perm(request, "payroll.view_salarystructure")
         if blocked:
             return blocked
-
-        class _Request:
-            POST = _Post(request.data)
-
-        response = preview_salary_structure(_Request(), pk)
-        return Response(json.loads(response.content), status=response.status_code)
+        structure = SalaryStructure.objects.filter(pk=pk).first()
+        if structure is None:
+            return Response(
+                {"ok": False, "error": str(_("Structure not found."))}, status=404
+            )
+        parsed = parse_preview_inputs(request.data)
+        if parsed is None:
+            return Response(
+                {"ok": False, "error": str(_("The sample figures must be numbers."))},
+                status=400,
+            )
+        monthly_ctc, contract_basic, lop_days, filing_pk = parsed
+        return Response(
+            build_salary_structure_preview(
+                structure, monthly_ctc, contract_basic, lop_days, filing_pk
+            ),
+            status=200,
+        )
 
 
 class ComponentCodeView(APIView):
@@ -524,7 +530,18 @@ class FilingStatusView(APIView):
         filing = FilingStatus.objects.filter(pk=pk).first()
         if filing is None:
             return Response({"detail": _("Filing status not found.")}, status=404)
-        filing.delete()
+        try:
+            filing.delete()
+        except ProtectedError:
+            return Response(
+                {
+                    "detail": _(
+                        "This filing status is still assigned to a contract. "
+                        "Reassign those contracts first."
+                    )
+                },
+                status=400,
+            )
         return Response({"status": "deleted"}, status=200)
 
 

@@ -340,9 +340,9 @@ class ContractView(APIView):
     def get(self, request, id=None):
         if id:
             if request.user.has_perm("payroll.view_contract"):
-                contract = Contract.objects.filter(id=id).first()
+                contract = Contract.objects.select_related("filing_status").filter(id=id).first()
             else:
-                contract = Contract.objects.filter(
+                contract = Contract.objects.select_related("filing_status").filter(
                     id=id, employee_id=request.user.employee_get
                 ).first()
             if not contract:
@@ -350,9 +350,11 @@ class ContractView(APIView):
             serializer = ContractSerializer(contract)
             return Response(serializer.data, status=200)
         if request.user.has_perm("payroll.view_contract"):
-            contracts = Contract.objects.all()
+            contracts = Contract.objects.select_related("filing_status")
         else:
-            contracts = Contract.objects.filter(employee_id=request.user.employee_get)
+            contracts = Contract.objects.select_related("filing_status").filter(
+                employee_id=request.user.employee_get
+            )
         filter_queryset = ContractFilter(request.GET, contracts).qs
         # groupby workflow
         field_name = request.GET.get("groupby_field", None)
@@ -688,11 +690,13 @@ class TaxBracketView(APIView):
 
     @method_decorator(permission_required("payroll.change_taxbracket"))
     def put(self, request, pk):
-        tax_bracket = TaxBracket.objects.get(id=pk)
+        tax_bracket = TaxBracket.objects.filter(id=pk).first()
+        if tax_bracket is None:
+            return Response({"detail": _("Tax bracket not found.")}, status=404)
         serializer = TaxBracketSerializer(
             instance=tax_bracket, data=request.data, partial=True
         )
-        if serializer.save():
+        if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=200)
         return Response(serializer.errors, status=400)

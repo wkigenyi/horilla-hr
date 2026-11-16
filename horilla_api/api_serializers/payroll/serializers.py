@@ -77,6 +77,11 @@ class ContractSerializer(serializers.ModelSerializer):
     work_type_name = serializers.CharField(
         source="work_type_id.work_type", read_only=True
     )
+    filing_status_name = serializers.SerializerMethodField()
+
+    def get_filing_status_name(self, obj):
+        status = obj.filing_status
+        return status.filing_status if status is not None else None
 
     def get_employee_profile_url(self, obj):
         try:

@@ -236,6 +236,63 @@ class PayrollApiTests(TestCase):
         self.assertEqual(updated.status_code, 200, updated.data)
         self.assertIs(updated.data["is_pretax"], False)
 
+    def test_salary_structure_preview_returns_the_worked_example(self):
+        structure = SalaryStructure.objects.create(
+            title="Preview", company_id=self.company
+        )
+        response = self.client.post(
+            f"/api/v1/payroll/salary-structure/{structure.pk}/preview/",
+            {"basic": 25000, "ctc": 0, "lop_days": 0},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertIs(response.data["ok"], True)
+        self.assertIsInstance(response.data["gross_pay"], (int, float))
+        self.assertIsInstance(response.data["net_pay"], (int, float))
+        self.assertEqual(Payslip.objects.count(), 0)
+        self.assertEqual(
+            Contract.objects.filter(salary_structure_id=structure).count(), 0
+        )
+
+    def test_salary_structure_preview_unknown_id(self):
+        response = self.client.post(
+            "/api/v1/payroll/salary-structure/999999/preview/",
+            {"basic": 25000, "ctc": 0},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 404, response.data)
+        self.assertIs(response.data["ok"], False)
+
+    def test_salary_structure_preview_requires_permission(self):
+        clerk = make_user("preview_clerk", password="secret123")
+        make_employee(
+            company=self.company, email="preview_clerk@test.horilla", user=clerk
+        )
+        structure = SalaryStructure.objects.create(
+            title="Preview", company_id=self.company
+        )
+        client = APIClient()
+        client.force_authenticate(user=clerk)
+        response = client.post(
+            f"/api/v1/payroll/salary-structure/{structure.pk}/preview/",
+            {"basic": 25000, "ctc": 0},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 403, response.data)
+        self.assertEqual(response.data["detail"], "Permission denied.")
+
+    def test_salary_structure_preview_rejects_a_non_numeric_basic(self):
+        structure = SalaryStructure.objects.create(
+            title="Preview", company_id=self.company
+        )
+        response = self.client.post(
+            f"/api/v1/payroll/salary-structure/{structure.pk}/preview/",
+            {"basic": "nope", "ctc": 0},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertIs(response.data["ok"], False)
+
     def test_filing_status_preview_matches_the_payslip_tax(self):
         filing = FilingStatus.objects.create(
             filing_status="Preview",

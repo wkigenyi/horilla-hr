@@ -1,0 +1,22 @@
+---
+description: Do not write the React UI from this repo — hand the screen work to horilla-hr-ui
+alwaysApply: true
+---
+
+# Frontend stays in the UI repo
+
+This workspace is the Django API and the HTMX reference UI. The React app is the sibling repo `D:\projects\horilla-hr-ui`.
+
+Do not create or edit frontend code from here. That includes `horilla-hr-ui`, and any `.tsx`, `.jsx`, or UI-only `.ts` file, even when the task is a screen.
+
+When a task needs a screen, finish the API in this repo, then guide the UI in the reply:
+
+- The route and what the screen shows
+- Endpoints, methods, request bodies, and response fields
+- Which permission codenames gate each button
+- What to leave unchanged in the HTMX UI
+
+```text
+✅ horilla_api change here, then a short handoff the UI repo can implement
+❌ Edit D:\projects\horilla-hr-ui or add a React component from this workspace
+```

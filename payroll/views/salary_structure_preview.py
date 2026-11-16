@@ -154,35 +154,42 @@ def _line(row, amount, note, employer=None):
     }
 
 
-@login_required
-@hx_request_required
-@permission_required("payroll.view_salarystructure")
-def preview_salary_structure(request, pk):
-    """Run the structure against sample figures. Saves nothing."""
-    structure = SalaryStructure.objects.filter(pk=pk).first()
-    if structure is None:
-        return JsonResponse(
-            {"ok": False, "error": str(_("Structure not found."))}, status=404
-        )
+def parse_preview_inputs(data):
+    """
+    Sample figures from a form body or a JSON object.
+
+    ``basic`` and ``ctc`` must be numbers; a blank is zero, the same as an
+    empty form field. ``lop_days`` that is missing or not a number stays 0.
+    ``filing_status`` is optional.
+    """
 
     def number(name, default=0.0):
+        raw = data.get(name)
+        if raw is None or raw == "":
+            raw = default
         try:
-            return float(request.POST.get(name) or default)
+            return float(raw)
         except (TypeError, ValueError):
             return None
 
     monthly_ctc = number("ctc")
     contract_basic = number("basic")
     if monthly_ctc is None or contract_basic is None:
-        return JsonResponse(
-            {"ok": False, "error": str(_("The sample figures must be numbers."))},
-            status=400,
-        )
+        return None
     try:
         lop_days = max(int(number("lop_days") or 0), 0)
     except (TypeError, ValueError):
         lop_days = 0
+    filing_pk = data.get("filing_status")
+    if filing_pk in ("", None):
+        filing_pk = None
+    return monthly_ctc, contract_basic, lop_days, filing_pk
 
+
+def build_salary_structure_preview(
+    structure, monthly_ctc, contract_basic, lop_days, filing_pk
+):
+    """The worked-example dict. Read-only: nothing is saved."""
     day_dict = sample_day_dict(lop_days)
     worked = day_dict[0]["working_days_on_period"]
     ratio = worked / SAMPLE_WORKING_DAYS if SAMPLE_WORKING_DAYS else 0.0
@@ -372,7 +379,6 @@ def preview_salary_structure(request, pk):
     tax_line = None
     income_tax = 0.0
     filing = None
-    filing_pk = request.POST.get("filing_status")
     if filing_pk:
         filing = FilingStatus.objects.filter(pk=filing_pk).first()
     if filing is not None:
@@ -550,7 +556,31 @@ def preview_salary_structure(request, pk):
         payload["ctc_gap"] = round(period_ctc - counted, 2)
         payload["ctc_reconciles"] = abs(period_ctc - counted) < 0.05
 
-    return JsonResponse(payload)
+    return payload
+
+
+@login_required
+@hx_request_required
+@permission_required("payroll.view_salarystructure")
+def preview_salary_structure(request, pk):
+    """Run the structure against sample figures. Saves nothing."""
+    structure = SalaryStructure.objects.filter(pk=pk).first()
+    if structure is None:
+        return JsonResponse(
+            {"ok": False, "error": str(_("Structure not found."))}, status=404
+        )
+    parsed = parse_preview_inputs(request.POST)
+    if parsed is None:
+        return JsonResponse(
+            {"ok": False, "error": str(_("The sample figures must be numbers."))},
+            status=400,
+        )
+    monthly_ctc, contract_basic, lop_days, filing_pk = parsed
+    return JsonResponse(
+        build_salary_structure_preview(
+            structure, monthly_ctc, contract_basic, lop_days, filing_pk
+        )
+    )
 
 
 @login_required
