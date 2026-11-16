@@ -349,8 +349,26 @@ def _scoped_active_employee_ids(request):
 
 
 def _company_scope_context(request) -> dict:
-    """Active company label for KPI / header chrome."""
-    selected = request.session.get("selected_company")
+    """Active company label for KPI / header chrome.
+
+    Classic session UI stores the switcher in ``selected_company``. JWT has
+    no session equivalent; ``TenantScopedJWTAuthentication`` puts the same
+    meaning on the company ContextVar (including ``X-Horilla-Company``).
+    Prefer session when present so HTMX behaviour is unchanged; otherwise
+    read the ContextVar.
+    """
+    selected = None
+    session = getattr(request, "session", None)
+    if session is not None:
+        selected = session.get("selected_company")
+    if not selected:
+        from horilla.horilla_middlewares import get_selected_company
+
+        company_id = get_selected_company()
+        if company_id is not None and company_id != "all":
+            selected = str(company_id)
+        else:
+            selected = "all"
     if not selected or selected == "all":
         return {
             "dashboard_company_label": str(_("All companies")),

@@ -136,6 +136,31 @@ class SystemPreferencesTests(TestCase):
             {"HH:mm"},
         )
 
+    def test_superuser_header_scopes_preferences_to_one_company(self):
+        """force_authenticate skips JWT auth; use a real token for the header."""
+        self.admin.set_password("secret123")
+        self.admin.save()
+        login = self.client.post(
+            "/api/v1/auth/login/",
+            {"username": "prefs_admin", "password": "secret123"},
+            format="json",
+        )
+        self.assertEqual(login.status_code, 200, login.content)
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+
+        all_scope = client.get(PREFERENCES_URL)
+        self.assertEqual(all_scope.status_code, 200, all_scope.content)
+        self.assertTrue(all_scope.data["company_is_all"])
+
+        one = client.get(
+            PREFERENCES_URL,
+            HTTP_X_HORILLA_COMPANY=str(self.company.id),
+        )
+        self.assertEqual(one.status_code, 200, one.content)
+        self.assertFalse(one.data["company_is_all"])
+        self.assertEqual(one.data["company_id"], self.company.id)
+
 
 class ColorThemeTests(TestCase):
     def setUp(self):

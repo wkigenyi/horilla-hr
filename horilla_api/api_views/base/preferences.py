@@ -2,10 +2,9 @@
 System Preferences and color themes over JWT.
 
 The web page at ``/settings/system-preferences-view/`` reads and writes a
-handful of per-company rows. Token requests have no session company, so the
-scope is the one ``TenantScopedJWTAuthentication`` already established: the
-employee's own company, or every company when the caller is a superuser
-(the web page's "All companies").
+handful of per-company rows. Token requests have no session company; scope
+is the ContextVar ``TenantScopedJWTAuthentication`` established (work-info
+company for employees, or a superuser's ``X-Horilla-Company`` / all).
 """
 
 from django.apps import apps
@@ -26,6 +25,7 @@ from base.models import (
 )
 from employee.models import EmployeeGeneralSetting, ProfileEditFeature
 from horilla.__version__ import __version__
+from horilla.horilla_middlewares import get_selected_company
 from horilla_api.authentication import resolve_company_id
 from horilla_audit.forms import HistoryTrackingFieldsForm
 from horilla_audit.models import AccountBlockUnblock, HistoryTrackingFields
@@ -44,9 +44,17 @@ def bind_request_user(request):
 
 
 def preference_company(user):
-    """Company these settings belong to, or None for all companies."""
-    company_id = resolve_company_id(user)
-    if company_id is None:
+    """Company these settings belong to, or None for all companies.
+
+    Prefer the request ContextVar (set by JWT auth / company header) so a
+    superuser's ``X-Horilla-Company`` scopes settings the same way lists do.
+    Fall back to ``resolve_company_id`` when the ContextVar is unset
+    (e.g. ``force_authenticate`` in tests).
+    """
+    company_id = get_selected_company()
+    if company_id is None or company_id == "all":
+        company_id = resolve_company_id(user)
+    if company_id is None or company_id == "all":
         return None
     return Company.objects.filter(pk=company_id).first()
 

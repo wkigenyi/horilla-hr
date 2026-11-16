@@ -67,6 +67,33 @@ class DashboardSummaryTests(TestCase):
         self.assertNotIn("recruitment-funnel", visible)
         self.assertNotIn("attendance-trend", visible)
         self.assertNotIn("payroll-summary", visible)
+        self.assertTrue(response.data["company_is_all"])
+
+    def test_superuser_company_header_narrows_dashboard_scope(self):
+        user = make_user("dash_switch", password="secret123", is_superuser=True)
+        make_employee(
+            company=self.company, email="dash_switch@test.horilla", user=user
+        )
+        login = self.client.post(
+            "/api/v1/auth/login/",
+            {"username": "dash_switch", "password": "secret123"},
+            format="json",
+        )
+        self.assertEqual(login.status_code, 200, login.content)
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+
+        all_scope = client.get(SUMMARY_URL)
+        self.assertEqual(all_scope.status_code, 200, all_scope.content)
+        self.assertTrue(all_scope.data["company_is_all"])
+
+        one = client.get(
+            SUMMARY_URL,
+            HTTP_X_HORILLA_COMPANY=str(self.company.id),
+        )
+        self.assertEqual(one.status_code, 200, one.content)
+        self.assertFalse(one.data["company_is_all"])
+        self.assertEqual(one.data["company_label"], self.company.company)
 
 
 class DashboardWidgetTests(TestCase):

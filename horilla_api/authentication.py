@@ -24,6 +24,12 @@ This class sets the ContextVar at the moment the user is resolved, which is
 the earliest point the company is knowable on a tokened request, so the API
 path gets the same manager-level scoping the web path already has.
 
+Superuser company switch
+------------------------
+Classic web uses ``request.session["selected_company"]``. JWT has no session
+equivalent; superusers may send ``X-Horilla-Company: <id|all>`` on each
+authenticated call instead. Non-superusers' headers are ignored.
+
 Scope
 -----
 This establishes the *manager-level* default scoping only. Per-viewset
@@ -36,25 +42,23 @@ from __future__ import annotations
 import logging
 
 from django.utils.translation import gettext_lazy as _
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from horilla.horilla_middlewares import set_selected_company
 
 logger = logging.getLogger(__name__)
 
+COMPANY_HEADER = "X-Horilla-Company"
+
 
 def resolve_company_id(user):
     """The company a tokened request should be scoped to, or None.
 
     Mirrors ``CompanyMiddleware._get_user_default_company``: the employee's
-    work-information company. There is no session on an API request, so the
-    session's ``selected_company`` (and its "all" mode) has no equivalent
-    here -- a token is scoped to the user's own company, which is the
-    conservative reading.
-
-    Superusers are left unscoped, matching the web path, where
-    ``HorillaCompanyManager`` treats "all" as tenant-wide for them.
+    work-information company. Superusers are left unscoped by default
+    (tenant-wide / "all"), matching the web path; they may narrow via
+    ``X-Horilla-Company`` (see ``apply_company_header``).
     """
     if user is None or not user.is_authenticated:
         return None
@@ -81,6 +85,51 @@ def resolve_company_id(user):
         # "no restriction needed".
         logger.exception("Could not resolve company for user_id=%s", user.pk)
         return None
+
+
+def _header_value(request):
+    """Read ``X-Horilla-Company`` from a Django or DRF request."""
+    headers = getattr(request, "headers", None)
+    if headers is not None:
+        raw = headers.get(COMPANY_HEADER)
+        if raw is not None:
+            return raw.strip()
+    meta = getattr(request, "META", None) or {}
+    return (meta.get("HTTP_X_HORILLA_COMPANY") or "").strip()
+
+
+def apply_company_header(user, request):
+    """Apply ``X-Horilla-Company`` for superusers; ignore for everyone else.
+
+    Values:
+      - omitted / empty: leave ContextVar as already set (unscoped for
+        superusers; work-info company for others)
+      - ``all``: leave unset / treat as all companies (superuser only)
+      - decimal company id: ``set_selected_company(<id>)`` when the row exists
+
+    Unknown or non-decimal values raise ``ValidationError`` (HTTP 400).
+    Non-superusers sending the header are ignored so older clients do not
+    break.
+    """
+    raw = _header_value(request)
+    if not raw or not getattr(user, "is_superuser", False):
+        return
+
+    if raw == "all":
+        # Explicit all: ensure managers stay unscoped even if something set
+        # a company earlier on this request.
+        set_selected_company(None)
+        return
+
+    if not raw.isdigit():
+        raise ValidationError({"detail": _("Invalid company.")})
+
+    from base.models import Company
+
+    company_id = int(raw)
+    if not Company.objects.filter(pk=company_id).exists():
+        raise ValidationError({"detail": _("Unknown company.")})
+    set_selected_company(company_id)
 
 
 class TenantScopedJWTAuthentication(JWTAuthentication):
@@ -115,4 +164,8 @@ class TenantScopedJWTAuthentication(JWTAuthentication):
                 getattr(user, "pk", None),
             )
             raise PermissionDenied(_("This account is not assigned to a company."))
+
+        # Superuser may narrow (or reaffirm all) via the request header.
+        # Non-superuser headers are ignored inside apply_company_header.
+        apply_company_header(user, request)
         return user, validated_token

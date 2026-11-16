@@ -178,3 +178,98 @@ class UnplaceableApiUserTests(TestCase):
         client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
         response = client.get(EMPLOYEE_LIST_URL)
         self.assertEqual(response.status_code, 403)
+
+
+class SuperuserCompanyHeaderTests(TestCase):
+    """``X-Horilla-Company`` is the JWT stand-in for session selected_company."""
+
+    def setUp(self):
+        self.client = APIClient()
+        set_selected_company(None)
+        self.company_a = make_company("Header Co A")
+        self.company_b = make_company("Header Co B", hq=False)
+        self.root = make_user("header_root", password="secret123", is_superuser=True)
+        make_employee(
+            company=self.company_a,
+            email="header_root@test.horilla",
+            first_name="Root",
+            user=self.root,
+        )
+        self.staff = make_user("header_staff", password="secret123")
+        make_employee(
+            company=self.company_a,
+            email="header_staff@test.horilla",
+            first_name="Staff",
+            user=self.staff,
+        )
+
+    def tearDown(self):
+        set_selected_company(None)
+
+    def _token(self, username):
+        response = self.client.post(
+            LOGIN_URL,
+            {"username": username, "password": "secret123"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        return response.data["access"]
+
+    def _authenticate(self, token, **extra):
+        from rest_framework.test import APIRequestFactory
+
+        from horilla_api.authentication import TenantScopedJWTAuthentication
+
+        request = APIRequestFactory().get(
+            EMPLOYEE_LIST_URL,
+            HTTP_AUTHORIZATION=f"Bearer {token}",
+            **extra,
+        )
+        set_selected_company(None)
+        return TenantScopedJWTAuthentication().authenticate(request)
+
+    def test_superuser_omitted_header_stays_unscoped(self):
+        self._authenticate(self._token("header_root"))
+        self.assertIsNone(get_selected_company())
+
+    def test_superuser_all_header_stays_unscoped(self):
+        self._authenticate(
+            self._token("header_root"),
+            HTTP_X_HORILLA_COMPANY="all",
+        )
+        self.assertIsNone(get_selected_company())
+
+    def test_superuser_valid_id_sets_contextvar(self):
+        self._authenticate(
+            self._token("header_root"),
+            HTTP_X_HORILLA_COMPANY=str(self.company_b.id),
+        )
+        self.assertEqual(get_selected_company(), self.company_b.id)
+
+    def test_superuser_unknown_id_is_400(self):
+        from rest_framework.exceptions import ValidationError
+
+        with self.assertRaises(ValidationError) as raised:
+            self._authenticate(
+                self._token("header_root"),
+                HTTP_X_HORILLA_COMPANY="99999999",
+            )
+        self.assertIn("detail", raised.exception.detail)
+
+        client = APIClient()
+        client.credentials(
+            HTTP_AUTHORIZATION=f"Bearer {self._token('header_root')}"
+        )
+        response = client.get(
+            EMPLOYEE_LIST_URL,
+            HTTP_X_HORILLA_COMPANY="99999999",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("detail", response.data)
+
+    def test_non_superuser_header_is_ignored(self):
+        self._authenticate(
+            self._token("header_staff"),
+            HTTP_X_HORILLA_COMPANY=str(self.company_b.id),
+        )
+        self.assertEqual(get_selected_company(), self.company_a.id)

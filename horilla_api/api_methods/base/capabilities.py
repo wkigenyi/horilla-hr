@@ -99,6 +99,7 @@ def build_capabilities(user):
             "delete_taxbracket": user.has_perm("payroll.delete_taxbracket"),
             "edit_own_profile": edit_own_profile,
             "manage_roles": user.is_superuser,
+            "can_switch_company": user.is_superuser,
         },
         "features": {label: apps.is_installed(label) for label in OPTIONAL_APPS},
     }
