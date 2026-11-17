@@ -1,0 +1,18 @@
+---
+description: Imara OHS is Uganda-first; follow the East Africa baseline and v1 slice
+alwaysApply: false
+globs:
+  - ohs/**/*
+  - horilla_api/**/ohs/**/*
+  - docs/ohs-east-africa-baseline.md
+---
+
+# Occupational Health and Safety (Imara)
+
+Product baseline: [`docs/ohs-east-africa-baseline.md`](docs/ohs-east-africa-baseline.md).
+
+- **Jurisdiction framing:** Uganda OSH Act 2006 + Workers Compensation Act first; Kenya OSHA/WIBA and ISO 45001 as secondary overlays on one schema.
+- **v1 slice only:** events (accident / near-miss / disease), labour-officer notification log, investigation + CAPA, General Register export, workplace registration certificate, policy + committee (≥20), medical exam metadata, PPE assignments, training records, compliance dashboard.
+- **Not v1:** plant examinations, risk matrices, PTW, inspection builders, chemical/CWC, insurance math, OSHMIS government API.
+- **Shape:** new `ohs` Django app + parallel `horilla_api` (like `asset` / `helpdesk`). React in `horilla-hr-ui` only; do not edit HTMX contracts for React.
+- Medical fields are fitness/surveillance **metadata + attachments**, not a clinical EHR. Respect privacy.

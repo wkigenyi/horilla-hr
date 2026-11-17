@@ -153,6 +153,37 @@ WAVE_TWO_KEYS = (
     "change_tickettype",
     "view_faq",
     "change_faq",
+    "view_oshworkplace",
+    "add_oshworkplace",
+    "change_oshworkplace",
+    "delete_oshworkplace",
+    "view_oshevent",
+    "add_oshevent",
+    "change_oshevent",
+    "delete_oshevent",
+    "view_oshnotification",
+    "add_oshnotification",
+    "change_oshnotification",
+    "view_oshinvestigation",
+    "add_oshinvestigation",
+    "change_oshinvestigation",
+    "view_oshcorrectiveaction",
+    "add_oshcorrectiveaction",
+    "change_oshcorrectiveaction",
+    "view_oshpolicy",
+    "add_oshpolicy",
+    "change_oshpolicy",
+    "view_oshsafetycommittee",
+    "change_oshsafetycommittee",
+    "view_oshmedicalrecord",
+    "add_oshmedicalrecord",
+    "change_oshmedicalrecord",
+    "view_oshppeassignment",
+    "add_oshppeassignment",
+    "change_oshppeassignment",
+    "view_oshtrainingrecord",
+    "add_oshtrainingrecord",
+    "change_oshtrainingrecord",
     "view_offboarding",
     "change_offboarding",
     "view_resignationletter",
@@ -182,7 +213,44 @@ WAVE_TWO_KEYS = (
     "change_horillacolortheme",
 )
 
-ALLOW_LIST_KEYS = FIRST_WAVE_KEYS + WAVE_TWO_KEYS
+WAVE_THREE_KEYS = (
+    "add_company",
+    "delete_company",
+    "view_department",
+    "add_department",
+    "change_department",
+    "delete_department",
+    "view_jobposition",
+    "add_jobposition",
+    "change_jobposition",
+    "delete_jobposition",
+    "view_jobrole",
+    "add_jobrole",
+    "change_jobrole",
+    "delete_jobrole",
+    "view_worktype",
+    "add_worktype",
+    "change_worktype",
+    "delete_worktype",
+    "view_employeeshift",
+    "add_employeeshift",
+    "change_employeeshift",
+    "delete_employeeshift",
+    "view_employeeshiftschedule",
+    "add_employeeshiftschedule",
+    "change_employeeshiftschedule",
+    "delete_employeeshiftschedule",
+    "view_rotatingshift",
+    "add_rotatingshift",
+    "change_rotatingshift",
+    "delete_rotatingshift",
+    "view_rotatingworktype",
+    "add_rotatingworktype",
+    "change_rotatingworktype",
+    "delete_rotatingworktype",
+)
+
+ALLOW_LIST_KEYS = FIRST_WAVE_KEYS + WAVE_TWO_KEYS + WAVE_THREE_KEYS
 
 HR_VIEW_KEYS = (
     "view_employee",
@@ -208,8 +276,20 @@ WAVE_TWO_VIEW_KEYS = (
     "view_recruitment",
     "view_asset",
     "view_ticket",
+    "view_oshevent",
     "view_offboarding",
     "view_objective",
+)
+
+WAVE_THREE_VIEW_KEYS = (
+    "view_department",
+    "view_jobposition",
+    "view_jobrole",
+    "view_worktype",
+    "view_employeeshift",
+    "view_employeeshiftschedule",
+    "view_rotatingshift",
+    "view_rotatingworktype",
 )
 
 
@@ -373,3 +453,50 @@ class CapabilitiesTests(TestCase):
         self.assertTrue(features["facedetection"])
         self.assertTrue(features["leave"])
         self.assertTrue(all(isinstance(v, bool) for v in features.values()))
+
+    def test_wave_three_keys_are_false_for_plain_employee(self):
+        permissions = build_capabilities(self.user)["permissions"]
+        self._assert_keys_present(permissions)
+        for key in WAVE_THREE_KEYS:
+            self.assertFalse(permissions[key], key)
+
+    def test_edit_employee_does_not_imply_add_jobposition(self):
+        """Production bug: HR with change_employee saw Add job position, API 401."""
+        hr = make_user("caps_hr_edit", password=PASSWORD)
+        make_employee(
+            company=self.company,
+            email="hr_edit@test.horilla",
+            first_name="Hari",
+            user=hr,
+        )
+        hr = self._grant(hr, "employee", "change_employee")
+        permissions = build_capabilities(hr)["permissions"]
+        self._assert_keys_present(permissions)
+        self.assertTrue(permissions["edit_employee"])
+        self.assertFalse(permissions["add_jobposition"])
+        for key in WAVE_THREE_VIEW_KEYS:
+            self.assertFalse(permissions[key], key)
+
+    def test_granted_add_jobposition_is_true(self):
+        jp_user = make_user("caps_jobpos", password=PASSWORD)
+        make_employee(
+            company=self.company,
+            email="jobpos@test.horilla",
+            first_name="Jay",
+            user=jp_user,
+        )
+        jp_user = self._grant(jp_user, "base", "add_jobposition")
+        permissions = build_capabilities(jp_user)["permissions"]
+        self._assert_keys_present(permissions)
+        self.assertTrue(permissions["add_jobposition"])
+        self.assertFalse(permissions["change_jobposition"])
+        self.assertFalse(permissions["add_department"])
+
+    def test_capabilities_endpoint_includes_wave_three_keys(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(CAPABILITIES_URL)
+        self.assertEqual(response.status_code, 200, response.content)
+        self._assert_keys_present(response.data["permissions"])
+        for key in WAVE_THREE_KEYS:
+            self.assertIn(key, response.data["permissions"])
+            self.assertIsInstance(response.data["permissions"][key], bool)

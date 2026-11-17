@@ -91,6 +91,7 @@ INSTALLED_APPS = [
     "horilla_api",
     "biometric",
     "helpdesk",
+    "ohs",
     "offboarding",
     "horilla_backup",
     "project",
@@ -470,6 +471,7 @@ SIDEBARS = [
     "project",
     "asset",
     "helpdesk",
+    "ohs",
     "report",
 ]
 
