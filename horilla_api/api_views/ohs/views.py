@@ -1,12 +1,16 @@
 """OHS JSON API — Imara v1."""
 
+import csv
+import io
 from datetime import timedelta
 
-from django.db.models import Count
+from django.db.models import Count, Exists, OuterRef
+from django.http import HttpResponse
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -40,6 +44,7 @@ from ohs.models import (
     OshTrainingRecord,
     OshWorkplace,
 )
+from ohs.services import can_close_event
 
 
 def object_check(cls, pk):
@@ -171,20 +176,178 @@ WorkplaceDetail = _retrieve_update_delete(
     "ohs.delete_oshworkplace",
 )
 
-EventListCreate = _list_create(
-    OshEvent,
-    OshEventSerializer,
-    "ohs.view_oshevent",
-    "ohs.add_oshevent",
-    filter_fields=("workplace", "event_type", "status", "employee", "compensable"),
-)
-EventDetail = _retrieve_update_delete(
-    OshEvent,
-    OshEventSerializer,
-    "ohs.view_oshevent",
-    "ohs.change_oshevent",
-    "ohs.delete_oshevent",
-)
+def _request_employee(request):
+    return getattr(request.user, "employee_get", None)
+
+
+def _wants_csv(request):
+    # Use export=csv — DRF reserves ?format= for renderer negotiation and 404s
+    # when no CSVRenderer is registered.
+    export = (request.GET.get("export") or request.GET.get("format") or "").lower()
+    accept = (request.META.get("HTTP_ACCEPT") or "").lower()
+    return export == "csv" or "text/csv" in accept
+
+
+def _event_queryset(request):
+    qs = OshEvent.objects.all().select_related("workplace", "employee", "reported_by")
+    for field in ("workplace", "event_type", "status", "employee", "compensable"):
+        value = request.GET.get(field)
+        if value not in (None, ""):
+            qs = qs.filter(**{field: value})
+    search = request.GET.get("search")
+    if search:
+        qs = qs.filter(title__icontains=search)
+    return qs
+
+
+def _validate_event_close(instance, data):
+    """Reject closing a compensable event without a complete WC s.10 notification."""
+    status_value = data.get("status", getattr(instance, "status", None))
+    if status_value != "closed":
+        return None
+    compensable = data.get("compensable", getattr(instance, "compensable", False))
+    if isinstance(compensable, str):
+        compensable = compensable.lower() in ("1", "true", "yes")
+    ok, message = can_close_event(instance, compensable=bool(compensable))
+    if not ok:
+        return {"error": message}
+    return None
+
+
+class EventListCreate(APIView):
+    permission_classes = [IsAuthenticated]
+    queryset = OshEvent.objects.none()
+
+    @permission_required("ohs.view_oshevent")
+    def get(self, request):
+        return _paginated(request, _event_queryset(request), OshEventSerializer)
+
+    def post(self, request):
+        try:
+            data = request.data.copy()
+        except AttributeError:
+            data = dict(request.data)
+        employee = _request_employee(request)
+        if request.user.has_perm("ohs.add_oshevent"):
+            serializer = OshEventSerializer(data=data)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        if employee is None:
+            return Response({"message": _("No permission")}, status=401)
+
+        # ESS self-report: reporter must be self; affected employee self or unset.
+        data["reported_by"] = employee.id
+        affected = data.get("employee")
+        if affected not in (None, "", employee.id, str(employee.id)):
+            return Response({"message": _("No permission")}, status=401)
+        if affected in (None, ""):
+            data["employee"] = employee.id
+
+        serializer = OshEventSerializer(data=data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class EventDetail(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @permission_required("ohs.view_oshevent")
+    def get(self, request, pk):
+        obj = object_check(OshEvent, pk)
+        if obj is None:
+            return Response({"error": _("OshEvent not found")}, status=404)
+        return Response(OshEventSerializer(obj).data, status=200)
+
+    @permission_required("ohs.change_oshevent")
+    def put(self, request, pk):
+        obj = object_check(OshEvent, pk)
+        if obj is None:
+            return Response({"error": _("OshEvent not found")}, status=404)
+        err = _validate_event_close(obj, request.data)
+        if err:
+            return Response(err, status=400)
+        serializer = OshEventSerializer(obj, data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=200)
+        return Response(serializer.errors, status=400)
+
+    @permission_required("ohs.change_oshevent")
+    def patch(self, request, pk):
+        obj = object_check(OshEvent, pk)
+        if obj is None:
+            return Response({"error": _("OshEvent not found")}, status=404)
+        err = _validate_event_close(obj, request.data)
+        if err:
+            return Response(err, status=400)
+        serializer = OshEventSerializer(obj, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=200)
+        return Response(serializer.errors, status=400)
+
+    @permission_required("ohs.delete_oshevent")
+    def delete(self, request, pk):
+        obj = object_check(OshEvent, pk)
+        if obj is None:
+            return Response({"error": _("OshEvent not found")}, status=404)
+        try:
+            obj.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except Exception as exc:
+            return Response({"error": str(exc)}, status=400)
+
+
+class EventCaseAPIView(APIView):
+    """Case file aggregate for investigations and the General Register UI."""
+
+    permission_classes = [IsAuthenticated]
+
+    @permission_required("ohs.view_oshevent")
+    def get(self, request, pk):
+        try:
+            event = (
+                OshEvent.objects.select_related(
+                    "workplace", "employee", "reported_by", "investigation", "investigation__lead"
+                )
+                .prefetch_related(
+                    "notifications",
+                    "corrective_actions",
+                    "medical_records",
+                )
+                .get(pk=pk)
+            )
+        except OshEvent.DoesNotExist:
+            return Response({"error": _("OshEvent not found")}, status=404)
+
+        try:
+            investigation = event.investigation
+        except OshInvestigation.DoesNotExist:
+            investigation = None
+        return Response(
+            {
+                "event": OshEventSerializer(event).data,
+                "notifications": OshNotificationSerializer(
+                    event.notifications.all(), many=True
+                ).data,
+                "investigation": (
+                    OshInvestigationSerializer(investigation).data
+                    if investigation
+                    else None
+                ),
+                "corrective_actions": OshCorrectiveActionSerializer(
+                    event.corrective_actions.all(), many=True
+                ).data,
+                "medical_records": OshMedicalRecordSerializer(
+                    event.medical_records.all(), many=True
+                ).data,
+            }
+        )
 
 NotificationListCreate = _list_create(
     OshNotification,
@@ -341,18 +504,74 @@ class GeneralRegisterAPIView(APIView):
     """Uganda General Register extract: accidents + occupational diseases."""
 
     permission_classes = [IsAuthenticated]
+    # Keep JSON as the only negotiated renderer so ?format= is not stolen
+    # by DRF; CSV is returned via export=csv or Accept: text/csv.
+    renderer_classes = [JSONRenderer]
 
-    @permission_required("ohs.view_oshevent")
-    def get(self, request):
-        qs = OshEvent.objects.filter(
-            event_type__in=["accident", "occupational_disease"]
-        ).select_related("workplace", "employee", "reported_by")
+    def _queryset(self, request):
+        complete_notice = OshNotification.objects.filter(
+            event_id=OuterRef("pk"),
+            notified_at__isnull=False,
+            written_report_at__isnull=False,
+        )
+        qs = (
+            OshEvent.objects.filter(
+                event_type__in=["accident", "occupational_disease"]
+            )
+            .select_related("workplace", "employee", "reported_by")
+            .annotate(has_complete_notification=Exists(complete_notice))
+        )
         workplace_id = request.GET.get("workplace")
         if workplace_id:
             qs = qs.filter(workplace_id=workplace_id)
         since = request.GET.get("since")
         if since:
             qs = qs.filter(occurred_at__date__gte=since)
+        return qs
+
+    @permission_required("ohs.view_oshevent")
+    def get(self, request):
+        qs = self._queryset(request)
+        if _wants_csv(request):
+            buffer = io.StringIO()
+            writer = csv.writer(buffer)
+            writer.writerow(
+                [
+                    "id",
+                    "workplace",
+                    "event_type",
+                    "occurred_at",
+                    "employee",
+                    "title",
+                    "severity",
+                    "compensable",
+                    "status",
+                    "notification_complete",
+                ]
+            )
+            for event in qs.order_by("-occurred_at"):
+                employee_name = (
+                    event.employee.get_full_name() if event.employee_id else ""
+                )
+                writer.writerow(
+                    [
+                        event.id,
+                        event.workplace.name if event.workplace_id else "",
+                        event.event_type,
+                        event.occurred_at.isoformat() if event.occurred_at else "",
+                        employee_name,
+                        event.title,
+                        event.severity,
+                        "yes" if event.compensable else "no",
+                        event.status,
+                        "yes" if event.has_complete_notification else "no",
+                    ]
+                )
+            response = HttpResponse(buffer.getvalue(), content_type="text/csv")
+            response["Content-Disposition"] = (
+                'attachment; filename="ohs-general-register.csv"'
+            )
+            return response
         return _paginated(request, qs, OshEventSerializer)
 
 

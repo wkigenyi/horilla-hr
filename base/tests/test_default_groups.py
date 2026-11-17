@@ -68,6 +68,25 @@ class AttendanceManagerGroupTests(TestCase):
         self.assertIn(("base", "change_department"), perms)
 
 
+class OshDefaultGroupTests(TestCase):
+    def setUp(self):
+        _sync_default_hrms_groups()
+
+    def test_hr_manager_and_osh_officer_get_ohs_perms(self):
+        osh_view = ("ohs", "view_oshevent")
+        osh_add = ("ohs", "add_oshevent")
+        self.assertIn(osh_view, _perms(Group.objects.get(name="HR Manager")))
+        self.assertIn(osh_add, _perms(Group.objects.get(name="HR Manager")))
+        self.assertIn(osh_view, _perms(Group.objects.get(name="OSH Officer")))
+        self.assertIn(osh_add, _perms(Group.objects.get(name="OSH Officer")))
+        self.assertIn(osh_view, _perms(Group.objects.get(name="Admin")))
+
+    def test_leave_manager_does_not_get_ohs(self):
+        self.assertNotIn(
+            ("ohs", "view_oshevent"), _perms(Group.objects.get(name="Leave Manager"))
+        )
+
+
 class AttendanceManagerPlannerTests(TestCase):
     def test_a_member_sees_the_whole_planner(self):
         _sync_default_hrms_groups()

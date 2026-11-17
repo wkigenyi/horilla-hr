@@ -1,4 +1,4 @@
-"""OHS v1 API: workplaces, events, notifications, register, dashboard."""
+"""OHS v1 API: workplaces, events, notifications, register, dashboard, hardening."""
 
 from datetime import date, timedelta
 
@@ -117,3 +117,125 @@ class OhsApiTests(TestCase):
         response = self.client.get("/api/v1/ohs/events/")
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.data.get("message"), "No permission")
+
+    def test_cannot_close_compensable_without_notification(self):
+        event = OshEvent.objects.create(
+            workplace=self.workplace,
+            event_type="accident",
+            title="Compensable injury",
+            description="Needs labour officer notice.",
+            occurred_at=timezone.now(),
+            employee=self.employee,
+            compensable=True,
+            status="reported",
+        )
+        blocked = self.client.patch(
+            f"/api/v1/ohs/events/{event.id}/",
+            {"status": "closed"},
+            format="json",
+        )
+        self.assertEqual(blocked.status_code, 400, blocked.content)
+        self.assertIn("Compensable", blocked.data.get("error", ""))
+
+        OshNotification.objects.create(
+            event=event,
+            channel="phone",
+            notified_at=timezone.now(),
+            written_report_at=timezone.now(),
+            authority_name="Labour Officer",
+        )
+        closed = self.client.patch(
+            f"/api/v1/ohs/events/{event.id}/",
+            {"status": "closed"},
+            format="json",
+        )
+        self.assertEqual(closed.status_code, 200, closed.content)
+        self.assertEqual(closed.data["status"], "closed")
+
+    def test_self_report_without_add_oshevent(self):
+        reporter = make_user("ohs_reporter", password="secret123")
+        emp = make_employee(
+            company=self.company,
+            email="reporter@test.horilla",
+            first_name="Rita",
+            user=reporter,
+        )
+        other = make_employee(
+            company=self.company,
+            email="other@test.horilla",
+            first_name="Omar",
+        )
+        self.client.force_authenticate(user=reporter)
+
+        ok = self.client.post(
+            "/api/v1/ohs/events/",
+            {
+                "workplace": self.workplace.id,
+                "event_type": "near_miss",
+                "title": "Self reported near miss",
+                "description": "I saw a hazard.",
+                "occurred_at": timezone.now().isoformat(),
+            },
+            format="json",
+        )
+        self.assertEqual(ok.status_code, 201, ok.content)
+        self.assertEqual(ok.data["reported_by"], emp.id)
+        self.assertEqual(ok.data["employee"], emp.id)
+
+        denied = self.client.post(
+            "/api/v1/ohs/events/",
+            {
+                "workplace": self.workplace.id,
+                "event_type": "near_miss",
+                "title": "For someone else",
+                "description": "Should fail.",
+                "occurred_at": timezone.now().isoformat(),
+                "employee": other.id,
+            },
+            format="json",
+        )
+        self.assertEqual(denied.status_code, 401)
+
+    def test_event_case_aggregate(self):
+        event = OshEvent.objects.create(
+            workplace=self.workplace,
+            event_type="accident",
+            title="Case file event",
+            description="Aggregate me.",
+            occurred_at=timezone.now(),
+            employee=self.employee,
+            compensable=True,
+        )
+        OshNotification.objects.create(
+            event=event,
+            channel="email",
+            notified_at=timezone.now(),
+            written_report_at=timezone.now(),
+        )
+        OshCorrectiveAction.objects.create(
+            event=event, title="Fix floor", status="open"
+        )
+        response = self.client.get(f"/api/v1/ohs/events/{event.id}/case/")
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.data["event"]["id"], event.id)
+        self.assertEqual(len(response.data["notifications"]), 1)
+        self.assertIsNone(response.data["investigation"])
+        self.assertEqual(len(response.data["corrective_actions"]), 1)
+        self.assertEqual(response.data["medical_records"], [])
+
+    def test_general_register_csv(self):
+        OshEvent.objects.create(
+            workplace=self.workplace,
+            event_type="accident",
+            title="CSV row",
+            description="Export me.",
+            occurred_at=timezone.now(),
+            employee=self.employee,
+            compensable=True,
+        )
+        response = self.client.get("/api/v1/ohs/general-register/?export=csv")
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertIn("text/csv", response["Content-Type"])
+        body = response.content.decode("utf-8")
+        self.assertIn("notification_complete", body)
+        self.assertIn("CSV row", body)

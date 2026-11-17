@@ -253,6 +253,7 @@ _HRMS_GROUP_MIGRATE_APPS = {
     "offboarding",
     "asset",
     "helpdesk",
+    "ohs",
     "project",
     "pms",
     "biometric",
@@ -280,6 +281,7 @@ _DEFAULT_HRMS_GROUPS = {
             "asset",
             "horilla_documents",
             "helpdesk",
+            "ohs",
             "pms",
         ),
         "actions": ("add", "view", "change", "delete"),
@@ -339,6 +341,13 @@ _DEFAULT_HRMS_GROUPS = {
             "employee": ("view",),
         },
     },
+    "OSH Officer": {
+        "apps": ("ohs", "employee"),
+        "actions": ("add", "view", "change", "delete"),
+        "app_actions": {
+            "employee": ("view",),
+        },
+    },
     "Project Manager": {
         "apps": ("project", "employee", "pms"),
         "actions": ("add", "view", "change", "delete"),
@@ -368,6 +377,7 @@ _ALL_HRMS_APP_LABELS = (
     "offboarding",
     "asset",
     "helpdesk",
+    "ohs",
     "project",
     "pms",
     "biometric",

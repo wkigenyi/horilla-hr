@@ -8,6 +8,7 @@ urlpatterns = [
     path("workplaces/", views.WorkplaceListCreate.as_view()),
     path("workplaces/<int:pk>/", views.WorkplaceDetail.as_view()),
     path("events/", views.EventListCreate.as_view()),
+    path("events/<int:pk>/case/", views.EventCaseAPIView.as_view()),
     path("events/<int:pk>/", views.EventDetail.as_view()),
     path("notifications/", views.NotificationListCreate.as_view()),
     path("notifications/<int:pk>/", views.NotificationDetail.as_view()),
