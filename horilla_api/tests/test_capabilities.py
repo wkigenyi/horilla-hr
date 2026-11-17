@@ -23,7 +23,8 @@ LOGIN_URL = "/api/v1/auth/login/"
 CAPABILITIES_URL = "/api/v1/base/capabilities/"
 PASSWORD = "secret123"
 
-# First-wave allow-list. Every key must be present (true or false).
+# Allow-list keys from has_perm (excludes view_team / edit_own_profile / manage_roles /
+# can_switch_company, which are derived separately). Every key must be present.
 FIRST_WAVE_KEYS = (
     "view_employee",
     "edit_employee",
@@ -83,6 +84,106 @@ FIRST_WAVE_KEYS = (
     "add_projectstage",
 )
 
+WAVE_TWO_KEYS = (
+    "approve_leave",
+    "approve_attendance",
+    "view_leaverequest",
+    "add_leaverequest",
+    "change_leaverequest",
+    "delete_leaverequest",
+    "view_leaveallocationrequest",
+    "change_leaveallocationrequest",
+    "view_leavetype",
+    "add_leavetype",
+    "change_leavetype",
+    "delete_leavetype",
+    "view_availableleave",
+    "change_availableleave",
+    "view_holidays",
+    "add_holidays",
+    "change_holidays",
+    "delete_holidays",
+    "view_companyleaves",
+    "add_companyleave",
+    "change_companyleaves",
+    "delete_companyleaves",
+    "view_attendance",
+    "add_attendance",
+    "change_attendance",
+    "delete_attendance",
+    "view_attendanceovertime",
+    "change_attendanceovertime",
+    "view_attendancelatecomeearlyout",
+    "view_recruitment",
+    "add_recruitment",
+    "change_recruitment",
+    "delete_recruitment",
+    "view_candidate",
+    "add_candidate",
+    "change_candidate",
+    "delete_candidate",
+    "view_stage",
+    "change_stage",
+    "view_interviewschedule",
+    "change_interviewschedule",
+    "view_onboardingstage",
+    "change_onboardingstage",
+    "view_onboardingtask",
+    "change_onboardingtask",
+    "view_candidatestage",
+    "change_candidatestage",
+    "view_candidatetask",
+    "change_candidatetask",
+    "view_asset",
+    "add_asset",
+    "change_asset",
+    "delete_asset",
+    "view_assetcategory",
+    "change_assetcategory",
+    "view_assetlot",
+    "change_assetlot",
+    "view_assetrequest",
+    "add_assetrequest",
+    "change_assetrequest",
+    "view_ticket",
+    "add_ticket",
+    "change_ticket",
+    "delete_ticket",
+    "view_tickettype",
+    "change_tickettype",
+    "view_faq",
+    "change_faq",
+    "view_offboarding",
+    "change_offboarding",
+    "view_resignationletter",
+    "add_resignationletter",
+    "change_resignationletter",
+    "view_offboardingstage",
+    "change_offboardingstage",
+    "view_offboardingtask",
+    "change_offboardingtask",
+    "view_objective",
+    "add_objective",
+    "change_objective",
+    "delete_objective",
+    "view_employeeobjective",
+    "change_employeeobjective",
+    "view_keyresult",
+    "change_keyresult",
+    "view_feedback",
+    "change_feedback",
+    "view_meetings",
+    "change_meetings",
+    "view_employeebonuspoint",
+    "change_employeebonuspoint",
+    "view_company",
+    "change_company",
+    "view_horillacolortheme",
+    "change_horillacolortheme",
+)
+
+ALLOW_LIST_KEYS = FIRST_WAVE_KEYS + WAVE_TWO_KEYS
+
 HR_VIEW_KEYS = (
     "view_employee",
     "view_payslip",
@@ -99,6 +200,16 @@ HR_VIEW_KEYS = (
     "view_project",
     "view_task",
     "view_timesheet",
+)
+
+WAVE_TWO_VIEW_KEYS = (
+    "view_leaverequest",
+    "view_attendance",
+    "view_recruitment",
+    "view_asset",
+    "view_ticket",
+    "view_offboarding",
+    "view_objective",
 )
 
 
@@ -126,9 +237,9 @@ class CapabilitiesTests(TestCase):
         return type(user).objects.get(pk=user.pk)
 
     def _assert_keys_present(self, permissions):
-        missing = [key for key in FIRST_WAVE_KEYS if key not in permissions]
+        missing = [key for key in ALLOW_LIST_KEYS if key not in permissions]
         self.assertEqual(missing, [])
-        for key in FIRST_WAVE_KEYS:
+        for key in ALLOW_LIST_KEYS:
             self.assertIsInstance(permissions[key], bool)
 
     def _login(self):
@@ -190,7 +301,7 @@ class CapabilitiesTests(TestCase):
         self.assertTrue(permissions["manage_roles"])
         self.assertTrue(permissions["can_switch_company"])
         self._assert_keys_present(permissions)
-        for key in FIRST_WAVE_KEYS:
+        for key in ALLOW_LIST_KEYS:
             self.assertTrue(permissions[key], key)
         # edit_own_profile stays the profile-edit feature flag, even for a superuser.
         self.assertEqual(
@@ -203,6 +314,27 @@ class CapabilitiesTests(TestCase):
         self._assert_keys_present(permissions)
         for key in HR_VIEW_KEYS:
             self.assertFalse(permissions[key], key)
+
+    def test_wave_two_view_keys_are_false_for_plain_employee(self):
+        permissions = build_capabilities(self.user)["permissions"]
+        self._assert_keys_present(permissions)
+        for key in WAVE_TWO_VIEW_KEYS:
+            self.assertFalse(permissions[key], key)
+
+    def test_granted_leave_view_leaverequest_is_true(self):
+        leave_user = make_user("caps_leave", password=PASSWORD)
+        make_employee(
+            company=self.company,
+            email="leave@test.horilla",
+            first_name="Lea",
+            user=leave_user,
+        )
+        leave_user = self._grant(leave_user, "leave", "view_leaverequest")
+        permissions = build_capabilities(leave_user)["permissions"]
+        self._assert_keys_present(permissions)
+        self.assertTrue(permissions["view_leaverequest"])
+        self.assertFalse(permissions["view_attendance"])
+        self.assertFalse(permissions["view_recruitment"])
 
     def test_granted_payslip_and_project_view_are_true(self):
         payroll_user = make_user("caps_payroll", password=PASSWORD)
