@@ -31,7 +31,11 @@ from recruitment import dashboard as recruitment_dashboard
 from attendance import dashboard as attendance_dashboard
 from base import dashboard as dashboard_module
 from onboarding import dashboard as onboarding_dashboard
-from base.dashboard_roles import resolve_home_role, role_default_prefs
+from base.dashboard_roles import (
+    can_see_analytics_home,
+    resolve_home_role,
+    role_default_prefs,
+)
 from base import ess_dashboard
 from project import dashboard as project_dashboard
 
@@ -58,6 +62,8 @@ WIDGETS = {
     "department-leave-days": dashboard_module.dashboard_department_leave_days,
     "hiring-timeline": dashboard_module.dashboard_hiring_timeline,
     "employee-status": dashboard_module.dashboard_employee_status,
+    "ticket-priority": dashboard_module.dashboard_ticket_priority,
+    "overdue-tickets": dashboard_module.dashboard_overdue_tickets,
 }
 
 # Chart ids the web template uses, keyed by the widget slug that feeds them.
@@ -78,33 +84,189 @@ CHART_WIDGETS = {
     "department_leave_days": "department-leave-days",
     "hiring_timeline": "hiring-timeline",
     "employee_status": "employee-status",
+    "ticket_priority": "ticket-priority",
+    "overdue_tickets": "overdue-tickets",
 }
 
 
+def _linked_employee(request):
+    try:
+        return request.user.employee_get
+    except Exception:
+        return None
+
+
+def _load_saved_chart_prefs(request):
+    """Normalized ``[{id, visible}, ...]`` from DashboardEmployeeCharts, or []."""
+    try:
+        from base.models import DashboardEmployeeCharts
+
+        emp = _linked_employee(request)
+        if not emp:
+            return []
+        obj = DashboardEmployeeCharts.objects.filter(employee=emp).first()
+        if obj and obj.charts is not None:
+            return dashboard_module._normalize_dashboard_chart_prefs(obj.charts)
+    except Exception:
+        pass
+    return []
+
+
+def _resolve_chart_prefs(request, role):
+    """
+    Full Customize catalog for the persona.
+
+    Saved prefs overlay role defaults when present; unknown/legacy ids are
+    dropped by normalization. Chart ``id`` values match the HTMX
+    ``data-chart-id`` names (and the prefs model).
+    """
+    catalog_ids = list(CHART_WIDGETS.keys())
+    defaults = role_default_prefs(role, catalog_ids)
+    saved = _load_saved_chart_prefs(request)
+    if not saved:
+        return defaults
+    saved_map = {item["id"]: bool(item.get("visible", True)) for item in saved}
+    return [
+        {
+            "id": pref["id"],
+            "visible": saved_map[pref["id"]]
+            if pref["id"] in saved_map
+            else pref["visible"],
+        }
+        for pref in defaults
+    ]
+
+
+def _visible_chart_slugs(chart_prefs):
+    return [
+        CHART_WIDGETS[pref["id"]]
+        for pref in chart_prefs
+        if pref.get("visible") and pref["id"] in CHART_WIDGETS
+    ]
+
+
+def _dashboard_summary_payload(request):
+    django_request = request._request
+    role = resolve_home_role(django_request)
+    chart_prefs = _resolve_chart_prefs(django_request, role)
+    scope = dashboard_module._company_scope_context(django_request)
+    return {
+        "role": role,
+        "visible_charts": _visible_chart_slugs(chart_prefs),
+        "chart_prefs": chart_prefs,
+        "date": date.today().isoformat(),
+        "company_label": scope["dashboard_company_label"],
+        "company_is_all": scope["dashboard_company_is_all"],
+        "can_open_ess": _linked_employee(django_request) is not None,
+        "can_open_analytics": can_see_analytics_home(role),
+    }
+
+
+def _serialize_setup_checklist(context):
+    """Turn the HTMX checklist context into a JSON-friendly payload."""
+    if not context.get("show_setup_checklist"):
+        return {"show_setup_checklist": False}
+
+    def _step(step):
+        if not step:
+            return None
+        return {
+            "key": step["key"],
+            "title": str(step["title"]),
+            "description": str(step["description"]),
+            "url": step.get("url") or "",
+            "done": bool(step.get("done")),
+        }
+
+    steps = [_step(s) for s in context.get("setup_steps") or []]
+    return {
+        "show_setup_checklist": True,
+        "steps": steps,
+        "next_step": _step(context.get("setup_next_step")),
+        "progress_pct": int(context.get("setup_progress_pct") or 0),
+        "company_pk": context.get("setup_company_pk"),
+    }
+
+
 class DashboardAPIView(APIView):
-    """Persona, default chart set and company scope for the caller."""
+    """Persona, chart prefs, company scope and home-switch flags for the caller."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response(_dashboard_summary_payload(request), status=200)
+
+
+class DashboardPrefsAPIView(APIView):
+    """Load or replace the caller's saved analytics chart preferences."""
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         django_request = request._request
         role = resolve_home_role(django_request)
-        visible = [
-            CHART_WIDGETS[pref["id"]]
-            for pref in role_default_prefs(role, list(CHART_WIDGETS))
-            if pref["visible"] and pref["id"] in CHART_WIDGETS
-        ]
-        scope = dashboard_module._company_scope_context(django_request)
+        chart_prefs = _resolve_chart_prefs(django_request, role)
         return Response(
             {
-                "role": role,
-                "visible_charts": visible,
-                "date": date.today().isoformat(),
-                "company_label": scope["dashboard_company_label"],
-                "company_is_all": scope["dashboard_company_is_all"],
+                "prefs": chart_prefs,
+                "visible_charts": _visible_chart_slugs(chart_prefs),
             },
             status=200,
         )
+
+    def put(self, request):
+        from base.models import DashboardEmployeeCharts
+
+        emp = _linked_employee(request._request)
+        if not emp:
+            return Response({"detail": "No linked employee."}, status=400)
+
+        raw = request.data.get("prefs", [])
+        if not isinstance(raw, list):
+            return Response({"detail": "prefs must be a list."}, status=400)
+
+        clean_prefs = dashboard_module._normalize_dashboard_chart_prefs(raw)
+        DashboardEmployeeCharts.objects.update_or_create(
+            employee=emp, defaults={"charts": clean_prefs}
+        )
+        role = resolve_home_role(request._request)
+        chart_prefs = _resolve_chart_prefs(request._request, role)
+        return Response(
+            {
+                "status": "ok",
+                "prefs": chart_prefs,
+                "visible_charts": _visible_chart_slugs(chart_prefs),
+            },
+            status=200,
+        )
+
+
+class DashboardSetupChecklistAPIView(APIView):
+    """Admin onboarding checklist state for the analytics home banner."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        context = dashboard_module._get_setup_checklist_context(request._request)
+        return Response(_serialize_setup_checklist(context), status=200)
+
+
+class DashboardSetupChecklistDismissAPIView(APIView):
+    """Record per-user, per-company dismissal of the setup checklist banner."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from base.models import SetupChecklistDismissal
+
+        django_request = request._request
+        if dashboard_module._is_setup_admin(django_request):
+            company_pk = dashboard_module._resolve_checklist_company(django_request)
+            SetupChecklistDismissal.objects.get_or_create(
+                user=django_request.user,
+                company_id=company_pk,
+            )
+        return Response({"ok": True}, status=200)
 
 
 PROJECT_WIDGETS = {
@@ -155,6 +317,8 @@ ESS_WIDGETS = {
     "objectives": ess_dashboard.ess_objectives,
     "announcements": ess_dashboard.ess_announcements,
     "upcoming": ess_dashboard.ess_upcoming,
+    "birthdays": ess_dashboard.ess_birthdays,
+    "interviews": ess_dashboard.ess_interviews,
 }
 
 

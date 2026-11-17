@@ -75,6 +75,21 @@ class EssDashboardTests(TestCase):
             )
             response.json()
 
+    def test_birthdays_and_interviews_shapes(self):
+        self.client.force_authenticate(user=self.user)
+
+        birthdays = self.client.get(widget_url("birthdays"))
+        self.assertEqual(birthdays.status_code, 200, birthdays.content)
+        birthday_data = birthdays.json()
+        self.assertIn("birthdays", birthday_data)
+        self.assertIsInstance(birthday_data["birthdays"], list)
+
+        interviews = self.client.get(widget_url("interviews"))
+        self.assertEqual(interviews.status_code, 200, interviews.content)
+        interview_data = interviews.json()
+        self.assertIn("interviews", interview_data)
+        self.assertIsInstance(interview_data["interviews"], list)
+
     def test_unknown_widget_is_404(self):
         self.client.force_authenticate(user=self.user)
         self.assertEqual(self.client.get(widget_url("nope")).status_code, 404)
