@@ -277,6 +277,22 @@ _PERMISSIONS = (
     ("add_rotatingworktype", "base.add_rotatingworktype"),
     ("change_rotatingworktype", "base.change_rotatingworktype"),
     ("delete_rotatingworktype", "base.delete_rotatingworktype"),
+    # Policies & Discipline (wave 4). Actiontype is the Django model spelling.
+    # Disciplinary PUT/DELETE still check add_disciplinaryaction in the API view;
+    # expose change_/delete_ for has_perm honesty, but UI should gate edit/delete
+    # on add_disciplinaryaction until that quirk is fixed separately.
+    ("view_policy", "employee.view_policy"),
+    ("add_policy", "employee.add_policy"),
+    ("change_policy", "employee.change_policy"),
+    ("delete_policy", "employee.delete_policy"),
+    ("view_disciplinaryaction", "employee.view_disciplinaryaction"),
+    ("add_disciplinaryaction", "employee.add_disciplinaryaction"),
+    ("change_disciplinaryaction", "employee.change_disciplinaryaction"),
+    ("delete_disciplinaryaction", "employee.delete_disciplinaryaction"),
+    ("view_actiontype", "employee.view_actiontype"),
+    ("add_actiontype", "employee.add_actiontype"),
+    ("change_actiontype", "employee.change_actiontype"),
+    ("delete_actiontype", "employee.delete_actiontype"),
     ("view_horillacolortheme", "horilla_theme.view_horillacolortheme"),
     ("change_horillacolortheme", "horilla_theme.change_horillacolortheme"),
 )

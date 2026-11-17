@@ -250,7 +250,22 @@ WAVE_THREE_KEYS = (
     "delete_rotatingworktype",
 )
 
-ALLOW_LIST_KEYS = FIRST_WAVE_KEYS + WAVE_TWO_KEYS + WAVE_THREE_KEYS
+WAVE_FOUR_KEYS = (
+    "view_policy",
+    "add_policy",
+    "change_policy",
+    "delete_policy",
+    "view_disciplinaryaction",
+    "add_disciplinaryaction",
+    "change_disciplinaryaction",
+    "delete_disciplinaryaction",
+    "view_actiontype",
+    "add_actiontype",
+    "change_actiontype",
+    "delete_actiontype",
+)
+
+ALLOW_LIST_KEYS = FIRST_WAVE_KEYS + WAVE_TWO_KEYS + WAVE_THREE_KEYS + WAVE_FOUR_KEYS
 
 HR_VIEW_KEYS = (
     "view_employee",
@@ -474,6 +489,8 @@ class CapabilitiesTests(TestCase):
         self._assert_keys_present(permissions)
         self.assertTrue(permissions["edit_employee"])
         self.assertFalse(permissions["add_jobposition"])
+        self.assertFalse(permissions["add_policy"])
+        self.assertFalse(permissions["add_disciplinaryaction"])
         for key in WAVE_THREE_VIEW_KEYS:
             self.assertFalse(permissions[key], key)
 
@@ -498,5 +515,49 @@ class CapabilitiesTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         self._assert_keys_present(response.data["permissions"])
         for key in WAVE_THREE_KEYS:
+            self.assertIn(key, response.data["permissions"])
+            self.assertIsInstance(response.data["permissions"][key], bool)
+
+    def test_wave_four_keys_are_false_for_plain_employee(self):
+        permissions = build_capabilities(self.user)["permissions"]
+        self._assert_keys_present(permissions)
+        for key in WAVE_FOUR_KEYS:
+            self.assertFalse(permissions[key], key)
+
+    def test_granted_add_policy_and_disciplinaryaction_are_true(self):
+        policy_user = make_user("caps_policy", password=PASSWORD)
+        make_employee(
+            company=self.company,
+            email="policy@test.horilla",
+            first_name="Pat",
+            user=policy_user,
+        )
+        policy_user = self._grant(policy_user, "employee", "add_policy")
+        policy_perms = build_capabilities(policy_user)["permissions"]
+        self._assert_keys_present(policy_perms)
+        self.assertTrue(policy_perms["add_policy"])
+        self.assertFalse(policy_perms["change_policy"])
+        self.assertFalse(policy_perms["add_disciplinaryaction"])
+
+        disc_user = make_user("caps_disc", password=PASSWORD)
+        make_employee(
+            company=self.company,
+            email="disc@test.horilla",
+            first_name="Dee",
+            user=disc_user,
+        )
+        disc_user = self._grant(disc_user, "employee", "add_disciplinaryaction")
+        disc_perms = build_capabilities(disc_user)["permissions"]
+        self._assert_keys_present(disc_perms)
+        self.assertTrue(disc_perms["add_disciplinaryaction"])
+        self.assertFalse(disc_perms["add_policy"])
+        self.assertFalse(disc_perms["change_disciplinaryaction"])
+
+    def test_capabilities_endpoint_includes_wave_four_keys(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get(CAPABILITIES_URL)
+        self.assertEqual(response.status_code, 200, response.content)
+        self._assert_keys_present(response.data["permissions"])
+        for key in WAVE_FOUR_KEYS:
             self.assertIn(key, response.data["permissions"])
             self.assertIsInstance(response.data["permissions"][key], bool)
