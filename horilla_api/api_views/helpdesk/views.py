@@ -465,8 +465,13 @@ class AttachmentGetCreateAPIView(APIView):
         serializer = AttachmentSerializer(page, many=True)
         return paginator.get_paginated_response(serializer.data)
 
-    def post(self, request):
-        serializer = AttachmentSerializer(data=request.data)
+    def post(self, request, ticket_id=None, comment_id=None):
+        data = request.data.copy()
+        if ticket_id is not None:
+            data["ticket_id"] = ticket_id
+        if comment_id is not None:
+            data["comment_id"] = comment_id
+        serializer = AttachmentSerializer(data=data)
         if serializer.is_valid():
             comment = serializer.validated_data.get("comment")
             ticket = serializer.validated_data.get("ticket") or (
@@ -528,9 +533,11 @@ class ClaimRequestGetCreateAPIView(APIView):
         serializer = ClaimRequestSerializer(page, many=True)
         return paginator.get_paginated_response(serializer.data)
 
-    def post(self, request):
+    def post(self, request, ticket_id=None):
         data = request.data.copy()
         data["employee_id_write"] = request.user.employee_get.id
+        if ticket_id is not None:
+            data["ticket_id_write"] = ticket_id
         serializer = ClaimRequestSerializer(data=data)
         if serializer.is_valid():
             claim_request = serializer.save()

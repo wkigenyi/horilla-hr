@@ -86,6 +86,8 @@ class CommentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Comment
         fields = "__all__"
+        # Clients write ticket_id; the model FK must not also be required on input.
+        extra_kwargs = {"ticket": {"read_only": True}}
 
     def get_employee_id(self, obj):
         if obj.employee_id:
@@ -177,8 +179,10 @@ class TicketSerializer(serializers.ModelSerializer):
         required=False,
     )
     raised_on_display = serializers.SerializerMethodField()
-    comments = CommentSerializer(many=True, read_only=True)
-    attachments = AttachmentSerializer(many=True, read_only=True)
+    comments = CommentSerializer(many=True, read_only=True, source="comment")
+    attachments = AttachmentSerializer(
+        many=True, read_only=True, source="ticket_attachment"
+    )
 
     class Meta:
         model = Ticket
@@ -214,7 +218,10 @@ class TicketSerializer(serializers.ModelSerializer):
 
     def get_tags(self, obj):
         if obj.tags.exists():
-            return [{"id": tag.id, "name": tag.name} for tag in obj.tags.all()]
+            return [
+                {"id": tag.id, "title": tag.title, "color": tag.color}
+                for tag in obj.tags.all()
+            ]
         return []
 
     def get_raised_on_display(self, obj):
