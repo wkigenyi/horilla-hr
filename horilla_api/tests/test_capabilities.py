@@ -375,6 +375,28 @@ class CapabilitiesTests(TestCase):
             build_capabilities(self.user)["permissions"]["can_switch_company"]
         )
 
+    def test_manage_roles_follows_auth_group_has_perm(self):
+        plain = build_capabilities(self.user)["permissions"]
+        self.assertFalse(plain["manage_roles"])
+        self.assertFalse(plain["can_switch_company"])
+
+        granted = make_user("caps_roles", password=PASSWORD)
+        make_employee(
+            company=self.company,
+            email="caps_roles@test.horilla",
+            first_name="Rita",
+            user=granted,
+        )
+        granted = self._grant(granted, "auth", "view_group")
+        caps = build_capabilities(granted)["permissions"]
+        self.assertTrue(caps["manage_roles"])
+        self.assertFalse(caps["can_switch_company"])
+
+        admin = make_user("caps_roles_su", password=PASSWORD, is_superuser=True)
+        su = build_capabilities(admin)["permissions"]
+        self.assertTrue(su["manage_roles"])
+        self.assertTrue(su["can_switch_company"])
+
     def test_reporting_manager_is_manager(self):
         report = make_employee(
             company=self.company,

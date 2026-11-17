@@ -1,9 +1,8 @@
-"""An employee profile lists that person's roles, and only a superuser can change them."""
+"""Employee roles are readable by self / view_employee; direct perms use auth.*_permission."""
 
 from django.contrib.auth.models import Group, Permission
-from rest_framework.test import APIClient
-
 from django.test import TestCase
+from rest_framework.test import APIClient
 
 from horilla.horilla_middlewares import set_selected_company
 from horilla.testkit import make_company, make_employee, make_user
@@ -30,12 +29,23 @@ class EmployeeAccessTests(TestCase):
         self.role = Group.objects.create(name="Payroll readers")
         self.user.groups.add(self.role)
         self.view_employee = Permission.objects.get(codename="view_employee")
+        self.view_permission = Permission.objects.get(
+            content_type__app_label="auth", codename="view_permission"
+        )
+        self.change_permission = Permission.objects.get(
+            content_type__app_label="auth", codename="change_permission"
+        )
+        self.view_group = Permission.objects.get(
+            content_type__app_label="auth", codename="view_group"
+        )
 
     def test_employee_sees_their_own_roles_and_not_the_permission_list(self):
         self.client.force_authenticate(user=self.user)
         response = self.client.get(access_url(self.employee.id))
         self.assertEqual(response.status_code, 200, response.content)
-        self.assertEqual(response.data["roles"], [{"id": self.role.id, "name": "Payroll readers"}])
+        self.assertEqual(
+            response.data["roles"], [{"id": self.role.id, "name": "Payroll readers"}]
+        )
         self.assertEqual(response.data["permissions"], [])
 
     def test_another_employee_cannot_read_those_roles(self):
@@ -65,7 +75,22 @@ class EmployeeAccessTests(TestCase):
         self.assertEqual(response.data["roles"][0]["name"], "Payroll readers")
         self.assertEqual(response.data["permissions"], [])
 
-    def test_only_a_superuser_can_change_direct_permissions(self):
+    def test_view_permission_returns_direct_permission_ids(self):
+        self.user.user_permissions.add(self.view_group)
+        reader = make_user("access_perm_reader", password=PASSWORD)
+        reader.user_permissions.add(self.view_employee, self.view_permission)
+        make_employee(
+            company=self.company,
+            email="perm-reader@test.horilla",
+            first_name="Pam",
+            user=reader,
+        )
+        self.client.force_authenticate(user=reader)
+        response = self.client.get(access_url(self.employee.id))
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertIn("auth.view_group", response.data["permissions"])
+
+    def test_change_permission_can_put_direct_permissions(self):
         self.client.force_authenticate(user=self.user)
         denied = self.client.put(
             access_url(self.employee.id),
@@ -74,8 +99,19 @@ class EmployeeAccessTests(TestCase):
         )
         self.assertEqual(denied.status_code, 403, denied.content)
 
-        admin = make_user("access_admin", password=PASSWORD, is_superuser=True)
-        self.client.force_authenticate(user=admin)
+        editor = make_user("access_perm_editor", password=PASSWORD)
+        editor.user_permissions.add(
+            self.view_employee, self.change_permission, self.view_group
+        )
+        make_employee(
+            company=self.company,
+            email="perm-editor@test.horilla",
+            first_name="Edd",
+            user=editor,
+        )
+        # Reload so has_perm sees grants (permission cache).
+        editor = type(editor).objects.get(pk=editor.pk)
+        self.client.force_authenticate(user=editor)
         allowed = self.client.put(
             access_url(self.employee.id),
             {"permissions": ["auth.view_group"]},
@@ -84,3 +120,10 @@ class EmployeeAccessTests(TestCase):
         self.assertEqual(allowed.status_code, 200, allowed.content)
         self.assertIn("auth.view_group", allowed.data["permissions"])
         self.assertEqual(allowed.data["roles"][0]["name"], "Payroll readers")
+
+        escalate = self.client.put(
+            access_url(self.employee.id),
+            {"permissions": ["auth.add_group"]},
+            format="json",
+        )
+        self.assertEqual(escalate.status_code, 400, escalate.content)

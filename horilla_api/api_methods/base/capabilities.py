@@ -333,7 +333,16 @@ def build_capabilities(user):
     permissions = {key: user.has_perm(perm) for key, perm in _PERMISSIONS}
     permissions["view_team"] = is_reportingmanager(_FakeRequest(user))
     permissions["edit_own_profile"] = edit_own_profile
-    permissions["manage_roles"] = user.is_superuser
+    # Roles admin: any auth.*_group grant (superuser included via has_perm).
+    permissions["manage_roles"] = any(
+        user.has_perm(codename)
+        for codename in (
+            "auth.view_group",
+            "auth.add_group",
+            "auth.change_group",
+            "auth.delete_group",
+        )
+    )
     permissions["can_switch_company"] = user.is_superuser
 
     return {

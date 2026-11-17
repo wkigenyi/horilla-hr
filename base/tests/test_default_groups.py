@@ -87,6 +87,19 @@ class OshDefaultGroupTests(TestCase):
         )
 
 
+class AdminAuthGroupSeedTests(TestCase):
+    def setUp(self):
+        _sync_default_hrms_groups()
+
+    def test_admin_receives_change_and_delete_group(self):
+        perms = _perms(Group.objects.get(name="Admin"))
+        self.assertIn(("auth", "view_group"), perms)
+        self.assertIn(("auth", "add_group"), perms)
+        self.assertIn(("auth", "change_group"), perms)
+        self.assertIn(("auth", "delete_group"), perms)
+        self.assertIn(("auth", "change_permission"), perms)
+
+
 class AttendanceManagerPlannerTests(TestCase):
     def test_a_member_sees_the_whole_planner(self):
         _sync_default_hrms_groups()

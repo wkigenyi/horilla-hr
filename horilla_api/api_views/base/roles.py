@@ -2,16 +2,16 @@
 Roles and direct employee permissions.
 
 Roles are Django auth groups. Direct permissions are the user's own
-``user_permissions``, separate from anything a role grants. A person's own
-roles, and anyone who can view employees, can read the role names. Changing
-roles or direct permissions stays superuser-only. The web settings page at
-``/settings/user-group-view/`` is the same data.
+``user_permissions``, separate from anything a role grants. Authority comes
+from ``has_perm`` on auth.*_group / auth.*_permission — not from is_superuser
+(except as Django's built-in has_perm escape hatch). Company switching stays
+superuser-only elsewhere.
 """
 
 from django.conf import settings
 from django.contrib.auth.models import Group, Permission
 from django.db.models import Count, Q
-from rest_framework.permissions import BasePermission, IsAuthenticated
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -33,14 +33,18 @@ ACTION_LABELS = {
 }
 
 
-class SuperuserOnly(BasePermission):
-    def has_permission(self, request, view):
-        user = request.user
-        return bool(user and user.is_authenticated and user.is_superuser)
-
-
 def _permission_id(app_label, codename):
     return f"{app_label}.{codename}"
+
+
+def _deny(detail="You do not have permission to perform this action."):
+    return Response({"detail": detail}, status=403)
+
+
+def _ensure(user, perm):
+    if user.has_perm(perm):
+        return None
+    return _deny()
 
 
 def _permissions_from_ids(raw):
@@ -58,6 +62,30 @@ def _permissions_from_ids(raw):
             return None
         found.append(perm)
     return found
+
+
+def _escalation_error(user, perms):
+    """Non-superusers may only assign permissions they themselves hold."""
+    if user.is_superuser:
+        return None
+    for perm in perms:
+        dotted = _permission_id(perm.content_type.app_label, perm.codename)
+        if not user.has_perm(dotted):
+            return Response(
+                {
+                    "permissions": (
+                        "You can only assign permissions you hold yourself."
+                    )
+                },
+                status=400,
+            )
+    return None
+
+
+def _may_read_direct_permissions(user):
+    return user.has_perm("auth.view_permission") or user.has_perm(
+        "auth.change_permission"
+    )
 
 
 def permission_catalog():
@@ -195,17 +223,27 @@ def _members(group):
     return people
 
 
+def _role_detail_body(group):
+    return {
+        "id": group.id,
+        "name": group.name,
+        "permissions": _assigned_ids(group.permissions.all()),
+        "members": _members(group),
+    }
+
+
 def _active_employee(employee_id):
     return (
         Employee.objects.filter(pk=employee_id, is_active=True)
-        .select_related("employee_user_id", "employee_work_info", "employee_work_info__company_id")
+        .select_related(
+            "employee_user_id", "employee_work_info", "employee_work_info__company_id"
+        )
         .first()
     )
 
 
 def _may_view_employee_access(request, employee):
-    """Role names are visible to the person, to anyone who can view employees,
-    and to a superuser. Changing them stays superuser-only."""
+    """Role names: self, employee.view_employee, or superuser (via has_perm path)."""
     user = request.user
     if not user.is_authenticated:
         return False
@@ -222,9 +260,12 @@ def _employee_roles(user):
 
 
 class RoleListAPIView(APIView):
-    permission_classes = [IsAuthenticated, SuperuserOnly]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        denied = _ensure(request.user, "auth.view_group")
+        if denied:
+            return denied
         groups = _roles_queryset().prefetch_related("permissions__content_type")
         return Response(
             {
@@ -236,6 +277,9 @@ class RoleListAPIView(APIView):
         )
 
     def post(self, request):
+        denied = _ensure(request.user, "auth.add_group")
+        if denied:
+            return denied
         name = str(request.data.get("name") or "").strip()
         if len(name) < 2 or len(name) > 150:
             return Response(
@@ -251,22 +295,21 @@ class RoleListAPIView(APIView):
 
 
 class RoleDetailAPIView(APIView):
-    permission_classes = [IsAuthenticated, SuperuserOnly]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request, pk):
+        denied = _ensure(request.user, "auth.view_group")
+        if denied:
+            return denied
         group = Group.objects.filter(pk=pk).first()
         if group is None:
             return Response({"detail": "Role not found."}, status=404)
-        return Response(
-            {
-                "id": group.id,
-                "name": group.name,
-                "permissions": _assigned_ids(group.permissions.all()),
-                "members": _members(group),
-            }
-        )
+        return Response(_role_detail_body(group))
 
     def patch(self, request, pk):
+        denied = _ensure(request.user, "auth.change_group")
+        if denied:
+            return denied
         group = Group.objects.filter(pk=pk).first()
         if group is None:
             return Response({"detail": "Role not found."}, status=404)
@@ -289,10 +332,16 @@ class RoleDetailAPIView(APIView):
                 return Response(
                     {"permissions": "Choose permissions from the list."}, status=400
                 )
+            escalate = _escalation_error(request.user, perms)
+            if escalate:
+                return escalate
             group.permissions.set(perms)
-        return self.get(request, pk)
+        return Response(_role_detail_body(group))
 
     def delete(self, request, pk):
+        denied = _ensure(request.user, "auth.delete_group")
+        if denied:
+            return denied
         group = Group.objects.filter(pk=pk).first()
         if group is None:
             return Response({"detail": "Role not found."}, status=404)
@@ -301,9 +350,12 @@ class RoleDetailAPIView(APIView):
 
 
 class RoleMemberAPIView(APIView):
-    permission_classes = [IsAuthenticated, SuperuserOnly]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
+        denied = _ensure(request.user, "auth.change_group")
+        if denied:
+            return denied
         group = Group.objects.filter(pk=pk).first()
         if group is None:
             return Response({"detail": "Role not found."}, status=404)
@@ -327,9 +379,12 @@ class RoleMemberAPIView(APIView):
             CompanyGroupAssignment.sync_user_group_membership(user, group)
         else:
             user.groups.add(group)
-        return RoleDetailAPIView().get(request, pk)
+        return Response(_role_detail_body(group))
 
     def delete(self, request, pk, employee_id):
+        denied = _ensure(request.user, "auth.change_group")
+        if denied:
+            return denied
         group = Group.objects.filter(pk=pk).first()
         employee = _active_employee(employee_id)
         user = getattr(employee, "employee_user_id", None) if employee else None
@@ -340,13 +395,16 @@ class RoleMemberAPIView(APIView):
             CompanyGroupAssignment.sync_user_group_membership(user, group)
         else:
             user.groups.remove(group)
-        return RoleDetailAPIView().get(request, pk)
+        return Response(_role_detail_body(group))
 
 
 class RolePeopleAPIView(APIView):
-    permission_classes = [IsAuthenticated, SuperuserOnly]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        denied = _ensure(request.user, "auth.change_group")
+        if denied:
+            return denied
         query = str(request.GET.get("q") or "").strip()
         people = Employee.objects.filter(is_active=True, employee_user_id__isnull=False)
         if query:
@@ -387,14 +445,14 @@ class EmployeePermissionsAPIView(APIView):
                 "roles": _employee_roles(user),
                 "permissions": (
                     _assigned_ids(user.user_permissions.all())
-                    if request.user.is_superuser
+                    if _may_read_direct_permissions(request.user)
                     else []
                 ),
             }
         )
 
     def put(self, request, employee_id):
-        if not request.user.is_superuser:
+        if not request.user.has_perm("auth.change_permission"):
             return Response(
                 {"detail": "You do not have permission to change this."}, status=403
             )
@@ -407,5 +465,8 @@ class EmployeePermissionsAPIView(APIView):
             return Response(
                 {"permissions": "Choose permissions from the list."}, status=400
             )
+        escalate = _escalation_error(request.user, perms)
+        if escalate:
+            return escalate
         user.user_permissions.set(perms)
         return self.get(request, employee_id)

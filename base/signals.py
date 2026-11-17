@@ -449,15 +449,17 @@ def _resolve_group_permissions(config):
             ).values_list("id", flat=True)
         )
 
-    # Admin also needs Django auth group/permission management
+    # Admin also needs Django auth group/permission management.
+    # Codenames only — never "auth.change_group" (that is a dotted label, not a
+    # Permission.codename), or change_group / delete_group never attach.
     if config.get("apps") == "__all__" and _is_app_available("auth"):
         permission_ids.extend(
             Permission.objects.filter(
                 content_type__app_label="auth",
                 codename__in=[
                     "add_group",
-                    "auth.change_group",
-                    "auth.delete_group",
+                    "change_group",
+                    "delete_group",
                     "view_group",
                     "add_permission",
                     "change_permission",
