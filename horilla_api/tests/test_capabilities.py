@@ -10,9 +10,11 @@ These are UI hints. The tests assert the payload's shape and derivation, not
 that it grants anything; authorization stays with the endpoints.
 """
 
+from django.contrib.auth.models import Permission
 from django.test import TestCase
 from rest_framework.test import APIClient
 
+from employee.models import ProfileEditFeature
 from horilla.horilla_middlewares import set_selected_company
 from horilla.testkit import make_company, make_employee, make_user
 from horilla_api.api_methods.base.capabilities import build_capabilities
@@ -20,6 +22,84 @@ from horilla_api.api_methods.base.capabilities import build_capabilities
 LOGIN_URL = "/api/v1/auth/login/"
 CAPABILITIES_URL = "/api/v1/base/capabilities/"
 PASSWORD = "secret123"
+
+# First-wave allow-list. Every key must be present (true or false).
+FIRST_WAVE_KEYS = (
+    "view_employee",
+    "edit_employee",
+    "approve_shift_request",
+    "view_payslip",
+    "change_payslip",
+    "add_payslip",
+    "delete_payslip",
+    "view_contract",
+    "add_contract",
+    "change_contract",
+    "view_loanaccount",
+    "change_loanaccount",
+    "add_loanaccount",
+    "view_payadjustment",
+    "add_payadjustment",
+    "change_payadjustment",
+    "delete_payadjustment",
+    "view_reimbursement",
+    "add_reimbursement",
+    "change_reimbursement",
+    "view_filingstatus",
+    "add_filingstatus",
+    "change_filingstatus",
+    "delete_filingstatus",
+    "view_taxbracket",
+    "add_taxbracket",
+    "change_taxbracket",
+    "delete_taxbracket",
+    "view_salarystructure",
+    "add_salarystructure",
+    "change_salarystructure",
+    "delete_salarystructure",
+    "view_allowance",
+    "add_allowance",
+    "change_allowance",
+    "delete_allowance",
+    "view_deduction",
+    "add_deduction",
+    "change_deduction",
+    "delete_deduction",
+    "view_payrollsettings",
+    "change_payrollsettings",
+    "change_encashmentgeneralsettings",
+    "view_project",
+    "add_project",
+    "change_project",
+    "delete_project",
+    "view_task",
+    "add_task",
+    "change_task",
+    "delete_task",
+    "view_timesheet",
+    "add_timesheet",
+    "change_timesheet",
+    "delete_timesheet",
+    "add_projectstage",
+)
+
+HR_VIEW_KEYS = (
+    "view_employee",
+    "view_payslip",
+    "view_contract",
+    "view_loanaccount",
+    "view_payadjustment",
+    "view_reimbursement",
+    "view_filingstatus",
+    "view_taxbracket",
+    "view_salarystructure",
+    "view_allowance",
+    "view_deduction",
+    "view_payrollsettings",
+    "view_project",
+    "view_task",
+    "view_timesheet",
+)
 
 
 class CapabilitiesTests(TestCase):
@@ -35,6 +115,21 @@ class CapabilitiesTests(TestCase):
             first_name="Cara",
             user=self.user,
         )
+
+    def _grant(self, user, app_label, codename):
+        user.user_permissions.add(
+            Permission.objects.get(
+                content_type__app_label=app_label, codename=codename
+            )
+        )
+        # has_perm caches on the instance; reload so the new grant is visible.
+        return type(user).objects.get(pk=user.pk)
+
+    def _assert_keys_present(self, permissions):
+        missing = [key for key in FIRST_WAVE_KEYS if key not in permissions]
+        self.assertEqual(missing, [])
+        for key in FIRST_WAVE_KEYS:
+            self.assertIsInstance(permissions[key], bool)
 
     def _login(self):
         response = self.client.post(
@@ -90,9 +185,53 @@ class CapabilitiesTests(TestCase):
 
     def test_superuser_is_hrexec(self):
         admin = make_user("caps_admin", password=PASSWORD, is_superuser=True)
+        permissions = build_capabilities(admin)["permissions"]
         self.assertEqual(build_capabilities(admin)["role"], "hrexec")
-        self.assertTrue(build_capabilities(admin)["permissions"]["manage_roles"])
-        self.assertTrue(build_capabilities(admin)["permissions"]["can_switch_company"])
+        self.assertTrue(permissions["manage_roles"])
+        self.assertTrue(permissions["can_switch_company"])
+        self._assert_keys_present(permissions)
+        for key in FIRST_WAVE_KEYS:
+            self.assertTrue(permissions[key], key)
+        # edit_own_profile stays the profile-edit feature flag, even for a superuser.
+        self.assertEqual(
+            permissions["edit_own_profile"],
+            ProfileEditFeature.objects.filter(is_enabled=True).exists(),
+        )
+
+    def test_first_wave_keys_are_false_without_hr_perms(self):
+        permissions = build_capabilities(self.user)["permissions"]
+        self._assert_keys_present(permissions)
+        for key in HR_VIEW_KEYS:
+            self.assertFalse(permissions[key], key)
+
+    def test_granted_payslip_and_project_view_are_true(self):
+        payroll_user = make_user("caps_payroll", password=PASSWORD)
+        make_employee(
+            company=self.company,
+            email="payroll@test.horilla",
+            first_name="Pia",
+            user=payroll_user,
+        )
+        payroll_user = self._grant(payroll_user, "payroll", "view_payslip")
+        payroll_perms = build_capabilities(payroll_user)["permissions"]
+        self._assert_keys_present(payroll_perms)
+        self.assertTrue(payroll_perms["view_payslip"])
+        self.assertFalse(payroll_perms["view_project"])
+        self.assertFalse(payroll_perms["view_contract"])
+
+        project_user = make_user("caps_project", password=PASSWORD)
+        make_employee(
+            company=self.company,
+            email="project@test.horilla",
+            first_name="Theo",
+            user=project_user,
+        )
+        project_user = self._grant(project_user, "project", "view_project")
+        project_perms = build_capabilities(project_user)["permissions"]
+        self._assert_keys_present(project_perms)
+        self.assertTrue(project_perms["view_project"])
+        self.assertFalse(project_perms["view_payslip"])
+        self.assertFalse(project_perms["view_task"])
 
     def test_features_report_installed_apps_explicitly(self):
         features = build_capabilities(self.user)["features"]

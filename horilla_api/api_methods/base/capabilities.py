@@ -18,6 +18,10 @@ indistinguishable, and probing costs speculative requests on every cold start.
 These are **UI hints, not authorization**. Every endpoint still enforces its
 own permissions; a client that lies to itself about ``role`` gets 403s, not
 access. Nothing here may be used as the basis for a security decision.
+
+``permissions`` is a fixed allow-list: every key is always present as a
+boolean. Clients that require ``true`` must not treat a missing key as
+allowed.
 """
 
 from django.apps import apps
@@ -41,6 +45,69 @@ OPTIONAL_APPS = (
     "pms",
     "project",
     "recruitment",
+)
+
+# Short key (no app_label) → Django permission. Superusers receive True from
+# has_perm. edit_own_profile is a feature flag and is not in this map.
+_PERMISSIONS = (
+    ("approve_leave", "leave.change_leaverequest"),
+    ("approve_attendance", "attendance.change_attendance"),
+    ("approve_shift_request", "base.change_shiftrequest"),
+    ("view_employee", "employee.view_employee"),
+    ("edit_employee", "employee.change_employee"),
+    ("view_payslip", "payroll.view_payslip"),
+    ("change_payslip", "payroll.change_payslip"),
+    ("add_payslip", "payroll.add_payslip"),
+    ("delete_payslip", "payroll.delete_payslip"),
+    ("view_contract", "payroll.view_contract"),
+    ("add_contract", "payroll.add_contract"),
+    ("change_contract", "payroll.change_contract"),
+    ("view_loanaccount", "payroll.view_loanaccount"),
+    ("change_loanaccount", "payroll.change_loanaccount"),
+    ("add_loanaccount", "payroll.add_loanaccount"),
+    ("view_payadjustment", "payroll.view_payadjustment"),
+    ("add_payadjustment", "payroll.add_payadjustment"),
+    ("change_payadjustment", "payroll.change_payadjustment"),
+    ("delete_payadjustment", "payroll.delete_payadjustment"),
+    ("view_reimbursement", "payroll.view_reimbursement"),
+    ("add_reimbursement", "payroll.add_reimbursement"),
+    ("change_reimbursement", "payroll.change_reimbursement"),
+    ("view_filingstatus", "payroll.view_filingstatus"),
+    ("add_filingstatus", "payroll.add_filingstatus"),
+    ("change_filingstatus", "payroll.change_filingstatus"),
+    ("delete_filingstatus", "payroll.delete_filingstatus"),
+    ("view_taxbracket", "payroll.view_taxbracket"),
+    ("add_taxbracket", "payroll.add_taxbracket"),
+    ("change_taxbracket", "payroll.change_taxbracket"),
+    ("delete_taxbracket", "payroll.delete_taxbracket"),
+    ("view_salarystructure", "payroll.view_salarystructure"),
+    ("add_salarystructure", "payroll.add_salarystructure"),
+    ("change_salarystructure", "payroll.change_salarystructure"),
+    ("delete_salarystructure", "payroll.delete_salarystructure"),
+    ("view_allowance", "payroll.view_allowance"),
+    ("add_allowance", "payroll.add_allowance"),
+    ("change_allowance", "payroll.change_allowance"),
+    ("delete_allowance", "payroll.delete_allowance"),
+    ("view_deduction", "payroll.view_deduction"),
+    ("add_deduction", "payroll.add_deduction"),
+    ("change_deduction", "payroll.change_deduction"),
+    ("delete_deduction", "payroll.delete_deduction"),
+    ("view_payrollsettings", "payroll.view_payrollsettings"),
+    ("change_payrollsettings", "payroll.change_payrollsettings"),
+    ("change_encashmentgeneralsettings", "payroll.change_encashmentgeneralsettings"),
+    ("view_project", "project.view_project"),
+    ("add_project", "project.add_project"),
+    ("change_project", "project.change_project"),
+    ("delete_project", "project.delete_project"),
+    ("view_task", "project.view_task"),
+    ("add_task", "project.add_task"),
+    ("change_task", "project.change_task"),
+    ("delete_task", "project.delete_task"),
+    ("view_timesheet", "project.view_timesheet"),
+    ("add_timesheet", "project.add_timesheet"),
+    ("change_timesheet", "project.change_timesheet"),
+    ("delete_timesheet", "project.delete_timesheet"),
+    ("add_projectstage", "project.add_projectstage"),
 )
 
 
@@ -76,30 +143,15 @@ def build_capabilities(user):
     """Return the capability payload for ``user``."""
     profile_edit = apps.get_model("employee", "ProfileEditFeature")
     edit_own_profile = profile_edit.objects.filter(is_enabled=True).exists()
+    permissions = {key: user.has_perm(perm) for key, perm in _PERMISSIONS}
+    permissions["view_team"] = is_reportingmanager(_FakeRequest(user))
+    permissions["edit_own_profile"] = edit_own_profile
+    permissions["manage_roles"] = user.is_superuser
+    permissions["can_switch_company"] = user.is_superuser
 
     return {
         "version": __version__,
         "role": _resolve_role(user),
-        "permissions": {
-            "approve_leave": user.has_perm("leave.change_leaverequest"),
-            "approve_attendance": user.has_perm("attendance.change_attendance"),
-            "approve_shift_request": user.has_perm("base.change_shiftrequest"),
-            "view_team": is_reportingmanager(_FakeRequest(user)),
-            "edit_employee": user.has_perm("employee.change_employee"),
-            "view_payslip": user.has_perm("payroll.view_payslip"),
-            "change_payslip": user.has_perm("payroll.change_payslip"),
-            "add_payslip": user.has_perm("payroll.add_payslip"),
-            "view_filingstatus": user.has_perm("payroll.view_filingstatus"),
-            "add_filingstatus": user.has_perm("payroll.add_filingstatus"),
-            "change_filingstatus": user.has_perm("payroll.change_filingstatus"),
-            "delete_filingstatus": user.has_perm("payroll.delete_filingstatus"),
-            "view_taxbracket": user.has_perm("payroll.view_taxbracket"),
-            "add_taxbracket": user.has_perm("payroll.add_taxbracket"),
-            "change_taxbracket": user.has_perm("payroll.change_taxbracket"),
-            "delete_taxbracket": user.has_perm("payroll.delete_taxbracket"),
-            "edit_own_profile": edit_own_profile,
-            "manage_roles": user.is_superuser,
-            "can_switch_company": user.is_superuser,
-        },
+        "permissions": permissions,
         "features": {label: apps.is_installed(label) for label in OPTIONAL_APPS},
     }
