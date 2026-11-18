@@ -96,6 +96,11 @@ _PERMISSIONS = (
     ("view_payrollsettings", "payroll.view_payrollsettings"),
     ("change_payrollsettings", "payroll.change_payrollsettings"),
     ("change_encashmentgeneralsettings", "payroll.change_encashmentgeneralsettings"),
+    # Pay period schedule/automation. PayPeriodView still checks these
+    # PayslipAutoGenerate codenames (model rename is out of scope).
+    ("view_payslipautogenerate", "payroll.view_payslipautogenerate"),
+    ("change_payslipautogenerate", "payroll.change_payslipautogenerate"),
+    ("delete_payslipautogenerate", "payroll.delete_payslipautogenerate"),
     ("view_project", "project.view_project"),
     ("add_project", "project.add_project"),
     ("change_project", "project.change_project"),
