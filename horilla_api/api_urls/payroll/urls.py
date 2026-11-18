@@ -33,8 +33,10 @@ from horilla_api.api_views.payroll.configure import (
     LoanInstallmentView,
     ReimbursementCommentDeleteView,
     ReimbursementCommentView,
+    SalaryStructureAssignableView,
     SalaryStructureComponentView,
     SalaryStructureDuplicateView,
+    SalaryStructureEmployeesView,
     SalaryStructurePreviewView,
     SalaryStructureView,
     SystemComponentView,
@@ -189,6 +191,16 @@ urlpatterns = [
         "salary-structure/<int:pk>/",
         SalaryStructureView.as_view(),
         name="api-salary-structure-detail",
+    ),
+    path(
+        "salary-structure/<int:pk>/assignable/",
+        SalaryStructureAssignableView.as_view(),
+        name="api-salary-structure-assignable",
+    ),
+    path(
+        "salary-structure/<int:pk>/employees/",
+        SalaryStructureEmployeesView.as_view(),
+        name="api-salary-structure-employees",
     ),
     path(
         "salary-structure/<int:pk>/duplicate/",

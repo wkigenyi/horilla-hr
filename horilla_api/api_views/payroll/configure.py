@@ -15,6 +15,7 @@ from payroll.component_library import library_rows, load_components
 from payroll.methods.component_formula import ComponentFormulaError, run_component_formula
 from payroll.methods.contributions import breakdown, summarise
 from payroll.methods.deductions import create_deductions
+from payroll.methods.structure_rules import assignable_employees, unassignable_reason
 from payroll.methods.safe_tax_code import (
     PYTHON_FORMULAS_OFF_MESSAGE,
     TaxCodeValidationError,
@@ -23,6 +24,7 @@ from payroll.methods.safe_tax_code import (
     validate_tax_code,
 )
 from payroll.methods.tax_calc import TaxComputationError, preview_yearly_tax
+from employee.models import Employee
 from payroll.models.models import (
     Allowance,
     Contract,
@@ -167,6 +169,115 @@ class SalaryStructureView(APIView):
             return Response({"detail": _("Salary structure not found.")}, status=404)
         structure.delete()
         return Response({"status": "deleted"}, status=200)
+
+
+def _employee_on_structure(employee, structure):
+    contract = employee.contract_set.filter(contract_status="active").first()
+    return bool(
+        contract is not None and contract.salary_structure_id_id == structure.pk
+    )
+
+
+def _structure_employee_errors(structure, employees):
+    """Same refusal messages as SalaryStructureForm.clean for employees."""
+    no_active_contract = []
+    taken = []
+    for employee in employees:
+        reason = unassignable_reason(employee, structure)
+        if reason == "no_contract":
+            no_active_contract.append(employee)
+        elif reason is not None:
+            taken.append((employee, reason))
+
+    problems = []
+    if no_active_contract:
+        problems.append(
+            _(
+                "These employees have no active contract, so a salary "
+                "structure can't be assigned to them: %(names)s"
+            )
+            % {"names": ", ".join(str(one) for one in no_active_contract)}
+        )
+    if taken:
+        problems.append(
+            _(
+                "These employees are already on another salary structure. "
+                "Remove them from it first, or change their contract: "
+                "%(names)s"
+            )
+            % {
+                "names": ", ".join(
+                    f"{employee} ({structure_name})"
+                    for employee, structure_name in taken
+                )
+            }
+        )
+    return problems
+
+
+class SalaryStructureAssignableView(APIView):
+    """Who may be put on this structure (classic assignable_employees)."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        blocked = require_perm(request, "payroll.change_salarystructure")
+        if blocked:
+            return blocked
+        structure = SalaryStructure.objects.filter(pk=pk).first()
+        if structure is None:
+            return Response({"detail": _("Salary structure not found.")}, status=404)
+        employees = [
+            {
+                "id": employee.pk,
+                "label": employee.get_full_name(),
+                "on_structure": _employee_on_structure(employee, structure),
+            }
+            for employee in assignable_employees(structure)
+        ]
+        return Response({"employees": employees}, status=200)
+
+
+class SalaryStructureEmployeesView(APIView):
+    """Replace the set of employees on this structure via active contracts."""
+
+    permission_classes = [IsAuthenticated]
+
+    def put(self, request, pk):
+        blocked = require_perm(request, "payroll.change_salarystructure")
+        if blocked:
+            return blocked
+        structure = SalaryStructure.objects.filter(pk=pk).first()
+        if structure is None:
+            return Response({"detail": _("Salary structure not found.")}, status=404)
+
+        wanted_ids = as_id_list(request.data.get("employee_ids"))
+        wanted = list(Employee.objects.filter(pk__in=wanted_ids))
+        problems = _structure_employee_errors(structure, wanted)
+        if problems:
+            return Response(
+                {"fieldErrors": {"employee_ids": [str(item) for item in problems]}},
+                status=400,
+            )
+
+        previous = {
+            contract.employee_id
+            for contract in structure._active_contracts()
+        }
+        wanted_set = set(wanted)
+
+        for employee in wanted_set - previous:
+            contract = employee.contract_set.filter(contract_status="active").first()
+            if contract is not None:
+                contract.set_salary_structure(structure)
+        for employee in previous - wanted_set:
+            contract = employee.contract_set.filter(
+                contract_status="active", salary_structure_id=structure
+            ).first()
+            if contract is not None:
+                contract.set_salary_structure(None)
+
+        return Response(_structure_payload(structure, detail=True), status=200)
 
 
 def _configurable(model, pk):

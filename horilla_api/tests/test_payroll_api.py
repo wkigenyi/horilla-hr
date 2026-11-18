@@ -345,3 +345,136 @@ class PayrollApiTests(TestCase):
         self.assertEqual(saved.data["currency_symbol"], "KSh")
         read = self.client.get("/api/v1/payroll/currency/")
         self.assertEqual(read.data["position"], "prefix")
+
+    def test_salary_structure_assignable_list_and_rules(self):
+        structure = SalaryStructure.objects.create(
+            title="Target", company_id=self.company
+        )
+        other = SalaryStructure.objects.create(
+            title="Elsewhere", company_id=self.company
+        )
+        free = make_employee(
+            company=self.company, email="free_struct@test.horilla", first_name="Free"
+        )
+        taken = make_employee(
+            company=self.company, email="taken_struct@test.horilla", first_name="Taken"
+        )
+        none = make_employee(
+            company=self.company, email="none_struct@test.horilla", first_name="None"
+        )
+        mine = make_employee(
+            company=self.company, email="mine_struct@test.horilla", first_name="Mine"
+        )
+        Contract.objects.filter(employee_id=taken).update(salary_structure_id=other)
+        Contract.objects.filter(employee_id=mine).update(salary_structure_id=structure)
+        Contract.objects.filter(employee_id=none).update(contract_status="expired")
+
+        response = self.client.get(
+            f"/api/v1/payroll/salary-structure/{structure.pk}/assignable/"
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        by_id = {row["id"]: row for row in response.data["employees"]}
+        self.assertIn(free.pk, by_id)
+        self.assertIs(by_id[free.pk]["on_structure"], False)
+        self.assertIn(mine.pk, by_id)
+        self.assertIs(by_id[mine.pk]["on_structure"], True)
+        self.assertNotIn(taken.pk, by_id)
+        self.assertNotIn(none.pk, by_id)
+        labels = [row["label"] for row in response.data["employees"]]
+        self.assertEqual(labels, sorted(labels, key=str.lower))
+
+    def test_salary_structure_employees_put_assigns_and_removes(self):
+        structure = SalaryStructure.objects.create(
+            title="Crew", company_id=self.company
+        )
+        keep = make_employee(
+            company=self.company, email="keep_struct@test.horilla", first_name="Keep"
+        )
+        drop = make_employee(
+            company=self.company, email="drop_struct@test.horilla", first_name="Drop"
+        )
+        add = make_employee(
+            company=self.company, email="add_struct@test.horilla", first_name="Add"
+        )
+        for employee in (keep, drop):
+            contract = Contract.objects.filter(
+                employee_id=employee, contract_status="active"
+            ).first()
+            contract.set_salary_structure(structure)
+
+        response = self.client.put(
+            f"/api/v1/payroll/salary-structure/{structure.pk}/employees/",
+            {"employee_ids": [keep.pk, add.pk]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertCountEqual(response.data["employee_ids"], [keep.pk, add.pk])
+        self.assertEqual(
+            Contract.objects.get(
+                employee_id=keep, contract_status="active"
+            ).salary_structure_id_id,
+            structure.pk,
+        )
+        self.assertEqual(
+            Contract.objects.get(
+                employee_id=add, contract_status="active"
+            ).salary_structure_id_id,
+            structure.pk,
+        )
+        self.assertIsNone(
+            Contract.objects.get(
+                employee_id=drop, contract_status="active"
+            ).salary_structure_id_id
+        )
+
+    def test_salary_structure_employees_put_rejects_taken_and_no_contract(self):
+        structure = SalaryStructure.objects.create(
+            title="Strict", company_id=self.company
+        )
+        other = SalaryStructure.objects.create(
+            title="Other", company_id=self.company
+        )
+        taken = make_employee(
+            company=self.company, email="bad_taken@test.horilla", first_name="Taken"
+        )
+        none = make_employee(
+            company=self.company, email="bad_none@test.horilla", first_name="None"
+        )
+        Contract.objects.filter(employee_id=taken).update(salary_structure_id=other)
+        Contract.objects.filter(employee_id=none).update(contract_status="expired")
+
+        response = self.client.put(
+            f"/api/v1/payroll/salary-structure/{structure.pk}/employees/",
+            {"employee_ids": [taken.pk, none.pk]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400, response.data)
+        errors = response.data["fieldErrors"]["employee_ids"]
+        self.assertTrue(any("no active contract" in msg for msg in errors))
+        self.assertTrue(any("already on another salary structure" in msg for msg in errors))
+
+    def test_salary_structure_assignable_requires_change_permission(self):
+        structure = SalaryStructure.objects.create(
+            title="Locked", company_id=self.company
+        )
+        clerk = make_user("struct_viewer", password="secret123")
+        make_employee(
+            company=self.company, email="struct_viewer@test.horilla", user=clerk
+        )
+        clerk.user_permissions.add(
+            Permission.objects.get(
+                codename="view_salarystructure", content_type__app_label="payroll"
+            )
+        )
+        client = APIClient()
+        client.force_authenticate(user=clerk)
+        assignable = client.get(
+            f"/api/v1/payroll/salary-structure/{structure.pk}/assignable/"
+        )
+        self.assertEqual(assignable.status_code, 403, assignable.data)
+        employees = client.put(
+            f"/api/v1/payroll/salary-structure/{structure.pk}/employees/",
+            {"employee_ids": []},
+            format="json",
+        )
+        self.assertEqual(employees.status_code, 403, employees.data)
