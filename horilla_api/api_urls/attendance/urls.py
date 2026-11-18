@@ -5,10 +5,49 @@ horilla_api/urls/attendance/urls.py
 from django.urls import path
 
 from horilla_api.api_views.attendance.permission_views import AttendancePermissionCheck
+from horilla_api.api_views.attendance.regularisation import (
+    MonthlySummaryCalendarAPIView,
+    MonthlySummaryConflictBulkResolveAPIView,
+    MonthlySummaryConflictResolveAPIView,
+    MonthlySummaryRegularisationConfirmAPIView,
+    MonthlySummaryRegularisationImportAPIView,
+    MonthlySummaryRegularisationTemplateAPIView,
+)
 from horilla_api.api_views.attendance.views import *
 from horilla_api.api_views.dashboard.views import AttendanceDashboardWidgetAPIView
 
 urlpatterns = [
+    path(
+        "monthly-summary/calendar/",
+        MonthlySummaryCalendarAPIView.as_view(),
+        name="api-attendance-monthly-summary-calendar",
+    ),
+    path(
+        "monthly-summary/conflict-resolve/",
+        MonthlySummaryConflictResolveAPIView.as_view(),
+        name="api-attendance-monthly-summary-conflict-resolve",
+    ),
+    path(
+        "monthly-summary/conflict-bulk-resolve/",
+        MonthlySummaryConflictBulkResolveAPIView.as_view(),
+        name="api-attendance-monthly-summary-conflict-bulk-resolve",
+    ),
+    path(
+        "monthly-summary/regularisation-template/",
+        MonthlySummaryRegularisationTemplateAPIView.as_view(),
+        name="api-attendance-regularisation-template",
+    ),
+    path(
+        "monthly-summary/regularisation-import/",
+        MonthlySummaryRegularisationImportAPIView.as_view(),
+        name="api-attendance-regularisation-import",
+    ),
+    path(
+        "monthly-summary/regularisation-confirm/",
+        MonthlySummaryRegularisationConfirmAPIView.as_view(),
+        name="api-attendance-regularisation-confirm",
+    ),
+
     path(
         "dashboard/<slug:widget>/",
         AttendanceDashboardWidgetAPIView.as_view(),
