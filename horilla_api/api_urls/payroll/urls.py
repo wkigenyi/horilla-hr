@@ -9,6 +9,10 @@ from horilla_api.api_views.payroll.adjustments import (
     PayAdjustmentStatusView,
     PayAdjustmentView,
 )
+from horilla_api.api_views.payroll.task_earnings import (
+    TaskEarningsPostView,
+    TaskEarningsPreviewView,
+)
 from horilla_api.api_views.payroll.accounting import (
     AccountingExportView,
     AccountingGLMappingView,
@@ -144,6 +148,16 @@ urlpatterns = [
         "pay-adjustment/<int:pk>/status/",
         PayAdjustmentStatusView.as_view(),
         name="api-pay-adjustment-status",
+    ),
+    path(
+        "task-earnings/preview/",
+        TaskEarningsPreviewView.as_view(),
+        name="api-task-earnings-preview",
+    ),
+    path(
+        "task-earnings/post/",
+        TaskEarningsPostView.as_view(),
+        name="api-task-earnings-post",
     ),
     path(
         "payslip/bulk-delete/",

@@ -3339,6 +3339,10 @@ class PayAdjustment(HorillaModel):
             self.save()
             if line is not None:
                 line.delete()
+            # Task earnings can be re-posted once the link is cleared.
+            from payroll.methods.task_pay import unlink_tasks_for_adjustment
+
+            unlink_tasks_for_adjustment(self)
 
     def delete(self, *args, **kwargs):
         if self.is_paid():
@@ -3349,6 +3353,9 @@ class PayAdjustment(HorillaModel):
             raise ValidationError(
                 _("Move A Confirmed Entry Back To Draft Before Deleting It.")
             )
+        from payroll.methods.task_pay import unlink_tasks_for_adjustment
+
+        unlink_tasks_for_adjustment(self)
         return super().delete(*args, **kwargs)
 
     @classmethod

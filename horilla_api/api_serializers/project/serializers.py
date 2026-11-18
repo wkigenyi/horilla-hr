@@ -11,7 +11,7 @@ from rest_framework import serializers
 
 from base.models import Company
 from employee.models import Employee
-from project.models import Project, ProjectStage, Task, TimeSheet
+from project.models import Project, ProjectStage, Task, TaskPayAllocation, TimeSheet
 
 
 def _validation_error(exc):
@@ -182,6 +182,7 @@ class TaskSerializer(serializers.ModelSerializer):
         write_only=True,
         required=False,
     )
+    pay_allocations = serializers.SerializerMethodField()
     allocated_seconds = serializers.IntegerField(read_only=True)
     timesheet_spent_seconds = serializers.IntegerField(read_only=True)
 
@@ -191,6 +192,8 @@ class TaskSerializer(serializers.ModelSerializer):
         extra_kwargs = {
             "task_managers": {"read_only": True},
             "task_members": {"read_only": True},
+            "completed_at": {"read_only": True},
+            "payroll_adjustment": {"read_only": True},
         }
 
     def get_project(self, obj):
@@ -235,6 +238,16 @@ class TaskSerializer(serializers.ModelSerializer):
             ]
         return []
 
+    def get_pay_allocations(self, obj):
+        return [
+            {
+                "employee_id": row.employee_id,
+                "employee_name": row.employee.get_full_name(),
+                "amount": row.amount,
+            }
+            for row in obj.pay_allocations.select_related("employee").all()
+        ]
+
     def validate(self, attrs):
         project = attrs.get("project", getattr(self.instance, "project", None))
         stage = attrs.get("stage", getattr(self.instance, "stage", None))
@@ -262,21 +275,135 @@ class TaskSerializer(serializers.ModelSerializer):
                             ]
                         }
                     )
+
+        members = attrs.get("task_members", serializers.empty)
+        if members is serializers.empty:
+            if self.instance is not None:
+                member_ids = set(
+                    self.instance.task_members.values_list("pk", flat=True)
+                )
+            else:
+                member_ids = set()
+        else:
+            member_ids = {emp.pk for emp in (members or [])}
+
+        # SerializerMethodField is read-only; accept write from the raw body.
+        if "pay_allocations" in self.initial_data:
+            attrs["pay_allocations"] = self._validated_allocations(
+                self.initial_data.get("pay_allocations"), member_ids
+            )
+
+        is_payable = attrs.get(
+            "is_payable", getattr(self.instance, "is_payable", False)
+        )
+        if is_payable:
+            final_allocations = attrs.get("pay_allocations")
+            if final_allocations is None and self.instance is not None:
+                final_allocations = list(
+                    self.instance.pay_allocations.values("employee_id", "amount")
+                )
+            if not final_allocations:
+                raise serializers.ValidationError(
+                    {
+                        "pay_allocations": [
+                            _("Add a pay amount for at least one task member.")
+                        ]
+                    }
+                )
         return attrs
 
+    def _validated_allocations(self, allocations, member_ids):
+        if not isinstance(allocations, list):
+            raise serializers.ValidationError(
+                {"pay_allocations": [_("Provide a list of participant amounts.")]}
+            )
+        cleaned = []
+        seen = set()
+        for index, row in enumerate(allocations):
+            if not isinstance(row, dict):
+                raise serializers.ValidationError(
+                    {
+                        "pay_allocations": [
+                            _("Each allocation must be an object with employee_id and amount.")
+                        ]
+                    }
+                )
+            employee_id = row.get("employee_id")
+            amount = row.get("amount")
+            try:
+                employee_id = int(employee_id)
+                amount = float(amount)
+            except (TypeError, ValueError):
+                raise serializers.ValidationError(
+                    {
+                        "pay_allocations": [
+                            _("Allocation %(n)s needs a valid employee_id and amount.")
+                            % {"n": index + 1}
+                        ]
+                    }
+                )
+            if employee_id in seen:
+                raise serializers.ValidationError(
+                    {
+                        "pay_allocations": [
+                            _("Each task member can only have one pay amount.")
+                        ]
+                    }
+                )
+            seen.add(employee_id)
+            if employee_id not in member_ids:
+                raise serializers.ValidationError(
+                    {
+                        "pay_allocations": [
+                            _("Pay amounts can only be set for task members.")
+                        ]
+                    }
+                )
+            if amount <= 0:
+                raise serializers.ValidationError(
+                    {
+                        "pay_allocations": [
+                            _("Enter an amount greater than zero for each participant.")
+                        ]
+                    }
+                )
+            cleaned.append({"employee_id": employee_id, "amount": amount})
+        return cleaned
+
     def create(self, validated_data):
-        return _save_model(
+        allocations = validated_data.pop("pay_allocations", None)
+        task = _save_model(
             Task,
             validated_data,
             m2m_names=("task_managers", "task_members"),
         )
+        if allocations is not None:
+            self._replace_allocations(task, allocations)
+        return task
 
     def update(self, instance, validated_data):
-        return _save_model(
+        allocations = validated_data.pop("pay_allocations", None)
+        task = _save_model(
             Task,
             validated_data,
             instance,
             m2m_names=("task_managers", "task_members"),
+        )
+        if allocations is not None:
+            self._replace_allocations(task, allocations)
+        return task
+
+    def _replace_allocations(self, task, allocations):
+        task.pay_allocations.all().delete()
+        TaskPayAllocation.objects.bulk_create(
+            [
+                TaskPayAllocation(
+                    task=task,
+                    employee_id=row["employee_id"],
+                    amount=row["amount"],
+                )
+                for row in allocations
+            ]
         )
 
 

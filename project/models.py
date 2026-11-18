@@ -379,7 +379,43 @@ class Task(HorillaModel):
     )
     description = models.TextField(verbose_name=_("Description"))
     sequence = models.IntegerField(default=0)
+    # Piece-rate payroll: payable tasks use TaskPayAllocation rows (per
+    # participant). completed_at is when status became completed (end_date is
+    # the due date). payroll_adjustment links a task once it has been included
+    # in a draft/confirmed Pay Adjustment so it is not posted twice.
+    is_payable = models.BooleanField(
+        default=False,
+        verbose_name=_("Payable"),
+        help_text=_("Include this task in payroll when it is completed."),
+    )
+    completed_at = models.DateField(
+        null=True,
+        blank=True,
+        editable=False,
+        verbose_name=_("Completed On"),
+    )
+    payroll_adjustment = models.ForeignKey(
+        "payroll.PayAdjustment",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        editable=False,
+        related_name="tasks",
+        verbose_name=_("Payroll Adjustment"),
+    )
     objects = HorillaCompanyManager("project__company_id")
+
+    def sync_completed_at(self):
+        """Stamp or clear completed_at from the current status."""
+        if self.status == "completed":
+            if self.completed_at is None:
+                self.completed_at = date.today()
+        else:
+            self.completed_at = None
+
+    def save(self, *args, **kwargs):
+        self.sync_completed_at()
+        super().save(*args, **kwargs)
 
     def clean(self) -> None:
         if (
@@ -655,6 +691,50 @@ class Task(HorillaModel):
         url_with_params = f"{url}?task_all=true"
         message = _("Are you sure you want to delete this task?")
         return f"'{url_with_params}'" + "," + f"'{message}'"
+
+
+class TaskPayAllocation(HorillaModel):
+    """
+    Per-participant amount for a payable task. The task total is the sum of
+    these rows; payroll posts each employee's own amount with no split.
+    """
+
+    task = models.ForeignKey(
+        Task,
+        on_delete=models.CASCADE,
+        related_name="pay_allocations",
+        verbose_name=_("Task"),
+    )
+    employee = models.ForeignKey(
+        Employee,
+        on_delete=models.CASCADE,
+        related_name="task_pay_allocations",
+        verbose_name=_("Employee"),
+    )
+    amount = models.FloatField(verbose_name=_("Amount"))
+
+    objects = HorillaCompanyManager("task__project__company_id")
+
+    class Meta:
+        unique_together = [("task", "employee")]
+        verbose_name = _("Task Pay Allocation")
+        verbose_name_plural = _("Task Pay Allocations")
+        ordering = ["pk"]
+
+    def __str__(self):
+        return f"{self.task_id}:{self.employee_id}={self.amount}"
+
+    def clean(self):
+        errors = {}
+        if self.amount is None or self.amount <= 0:
+            errors["amount"] = _("Enter an amount greater than zero.")
+        if self.task_id and self.employee_id:
+            if not self.task.task_members.filter(pk=self.employee_id).exists():
+                errors["employee"] = _(
+                    "Pay amounts can only be set for task members."
+                )
+        if errors:
+            raise ValidationError(errors)
 
 
 class TimeSheet(HorillaModel):
