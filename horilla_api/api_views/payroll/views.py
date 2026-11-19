@@ -89,6 +89,15 @@ def _as_id_list(value):
     return ids
 
 
+# A payslip reaches its employee only once payroll has finished with it.
+# Draft and in-review slips still change, so only payroll staff see them.
+EMPLOYEE_VISIBLE_PAYSLIP_STATUSES = ("confirmed", "paid")
+
+
+def employee_may_see_payslip(payslip):
+    return payslip.status in EMPLOYEE_VISIBLE_PAYSLIP_STATUSES
+
+
 class PayslipView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -97,10 +106,12 @@ class PayslipView(APIView):
             payslip = Payslip.objects.filter(id=id).first()
             if payslip is None:
                 return Response({"detail": "Not found."}, status=404)
-            if (
-                request.user.has_perm("payroll.view_payslip")
-                or payslip.employee_id == request.user.employee_get
-            ):
+            if request.user.has_perm("payroll.view_payslip"):
+                serializer = PayslipSerializer(payslip)
+                return Response(serializer.data, status=200)
+            if payslip.employee_id == request.user.employee_get:
+                if not employee_may_see_payslip(payslip):
+                    return Response({"detail": "Not found."}, status=404)
                 serializer = PayslipSerializer(payslip)
                 return Response(serializer.data, status=200)
             return Response({"detail": _("Permission denied.")}, status=403)
@@ -108,7 +119,8 @@ class PayslipView(APIView):
             payslips = Payslip.objects.all()
         else:
             payslips = Payslip.objects.filter(
-                employee_id__employee_user_id=request.user
+                employee_id__employee_user_id=request.user,
+                status__in=EMPLOYEE_VISIBLE_PAYSLIP_STATUSES,
             )
 
         payslip_filter_queryset = PayslipFilter(request.GET, payslips).qs
@@ -762,6 +774,10 @@ class PayslipPDFAPIView(APIView):
                 {"detail": _("You do not have permission to view this payslip.")},
                 status=status.HTTP_403_FORBIDDEN,
             )
+        if not user.has_perm("payroll.view_payslip") and not employee_may_see_payslip(
+            payslip
+        ):
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
 
         # employee & company date format resolution
         employee = user.employee_get  # keep same accessor you used
