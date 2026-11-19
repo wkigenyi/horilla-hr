@@ -298,6 +298,20 @@ class DashboardWidgetTests(TestCase):
             self.assertEqual(response.status_code, 200, (slug, response.content))
             self.assertIn(key, response.json())
 
+    def test_side_panels_carry_iso_dates(self):
+        from base.models import Holidays
+
+        today = date.today()
+        Holidays.objects.create(name="Imara Day", start_date=today, end_date=today)
+        self.client.force_authenticate(user=self.admin)
+        response = self.client.get(widget_url("upcoming-holidays"))
+        self.assertEqual(response.status_code, 200, response.content)
+        holiday = next(
+            item for item in response.json()["holidays"] if item["name"] == "Imara Day"
+        )
+        self.assertEqual(holiday["start_on"], today.isoformat())
+        self.assertEqual(holiday["end_on"], today.isoformat())
+
     def test_unknown_widget_is_404(self):
         self.client.force_authenticate(user=self.admin)
         self.assertEqual(self.client.get(widget_url("nope")).status_code, 404)

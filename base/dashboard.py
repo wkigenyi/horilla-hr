@@ -883,6 +883,13 @@ def dashboard_announcements(request):
                     "expire_date": (
                         ann.expire_date.strftime("%b %d") if ann.expire_date else None
                     ),
+                    # ISO dates, so the React UI can show the company's format.
+                    "posted_on": (
+                        ann.created_at.date().isoformat() if ann.created_at else None
+                    ),
+                    "expire_on": (
+                        ann.expire_date.isoformat() if ann.expire_date else None
+                    ),
                 }
             )
     except Exception:
@@ -932,6 +939,7 @@ def dashboard_birthdays_anniversaries(request):
                     "name": emp.get_full_name(),
                     "avatar": emp.get_avatar(),
                     "date": this_year_bday.strftime("%b %d"),
+                    "on": this_year_bday.isoformat(),
                     "days_away": (this_year_bday - today).days,
                 }
             )
@@ -959,6 +967,7 @@ def dashboard_birthdays_anniversaries(request):
                     "name": emp.get_full_name(),
                     "avatar": emp.get_avatar(),
                     "date": this_year_ann.strftime("%b %d"),
+                    "on": this_year_ann.isoformat(),
                     "years": years,
                     "days_away": (this_year_ann - today).days,
                 }
@@ -1876,6 +1885,8 @@ def dashboard_todays_leave(request):
                     "leave_type": lr.leave_type_id.name if lr.leave_type_id else "—",
                     "start": lr.start_date.strftime("%b %d"),
                     "end": lr.end_date.strftime("%b %d"),
+                    "start_on": lr.start_date.isoformat(),
+                    "end_on": lr.end_date.isoformat(),
                     "days": float(lr.requested_days) if lr.requested_days else 1,
                 }
             )
@@ -1921,6 +1932,8 @@ def dashboard_upcoming_holidays(request):
                     "name": h.name,
                     "start_date": h.start_date.strftime("%b %d"),
                     "end_date": h.end_date.strftime("%b %d") if h.end_date else None,
+                    "start_on": h.start_date.isoformat(),
+                    "end_on": h.end_date.isoformat() if h.end_date else None,
                     "days_away": (h.start_date - today).days,
                 }
             )
