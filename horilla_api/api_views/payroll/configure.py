@@ -10,12 +10,15 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from base.methods import get_next_month_same_date, get_nth_month_same_date
+from employee.models import Employee
 from horilla_api.api_methods.base.pagination import HorillaPageNumberPagination
 from payroll.component_library import library_rows, load_components
-from payroll.methods.component_formula import ComponentFormulaError, run_component_formula
+from payroll.methods.component_formula import (
+    ComponentFormulaError,
+    run_component_formula,
+)
 from payroll.methods.contributions import breakdown, summarise
 from payroll.methods.deductions import create_deductions
-from payroll.methods.structure_rules import assignable_employees, unassignable_reason
 from payroll.methods.safe_tax_code import (
     PYTHON_FORMULAS_OFF_MESSAGE,
     TaxCodeValidationError,
@@ -23,8 +26,8 @@ from payroll.methods.safe_tax_code import (
     same_formula,
     validate_tax_code,
 )
+from payroll.methods.structure_rules import assignable_employees, unassignable_reason
 from payroll.methods.tax_calc import TaxComputationError, preview_yearly_tax
-from employee.models import Employee
 from payroll.models.models import (
     Allowance,
     Contract,
@@ -121,7 +124,9 @@ class SalaryStructureView(APIView):
         if pk:
             structure = SalaryStructure.objects.filter(pk=pk).first()
             if structure is None:
-                return Response({"detail": _("Salary structure not found.")}, status=404)
+                return Response(
+                    {"detail": _("Salary structure not found.")}, status=404
+                )
             return Response(_structure_payload(structure, detail=True), status=200)
         pagination = HorillaPageNumberPagination()
         page = pagination.paginate_queryset(
@@ -265,10 +270,7 @@ class SalaryStructureEmployeesView(APIView):
                 status=400,
             )
 
-        previous = {
-            contract.employee_id
-            for contract in structure._active_contracts()
-        }
+        previous = {contract.employee_id for contract in structure._active_contracts()}
         wanted_set = set(wanted)
 
         for employee in wanted_set - previous:
@@ -459,7 +461,8 @@ class ComponentFormulaPreviewView(APIView):
                 "ok": True,
                 "result": round(result, 2),
                 "used": [
-                    {"code": code, "value": round(float(context[code]), 2)} for code in used
+                    {"code": code, "value": round(float(context[code]), 2)}
+                    for code in used
                 ],
             },
             status=200,
@@ -474,7 +477,9 @@ class ComponentLimitPreviewView(APIView):
         if blocked:
             return blocked
         try:
-            ceiling = float(request.data.get("maximum_amount") or request.data.get("ceiling") or 0)
+            ceiling = float(
+                request.data.get("maximum_amount") or request.data.get("ceiling") or 0
+            )
         except (TypeError, ValueError):
             return Response({"detail": _("The ceiling must be a number.")}, status=400)
         basis = request.data.get("maximum_unit") or request.data.get("basis") or ""
@@ -493,7 +498,12 @@ class ComponentLibraryView(APIView):
         )
         rows = []
         for row in library_rows(titles):
-            rows.append({key: str(value) if key != "already_loaded" else value for key, value in row.items()})
+            rows.append(
+                {
+                    key: str(value) if key != "already_loaded" else value
+                    for key, value in row.items()
+                }
+            )
         return Response(rows, status=200)
 
     def post(self, request):
@@ -506,7 +516,9 @@ class ComponentLibraryView(APIView):
                 {
                     "id": component.pk,
                     "title": component.title,
-                    "kind": "deduction" if isinstance(component, Deduction) else "allowance",
+                    "kind": (
+                        "deduction" if isinstance(component, Deduction) else "allowance"
+                    ),
                 }
                 for component in created
             ],
@@ -520,7 +532,9 @@ def _system_payload(entry):
     if row is not None:
         exceptions = [
             {"employee_id": item.employee_id_id, "value": item.value}
-            for item in SystemComponentTaxOverride.objects.filter(system_key=entry["key"])
+            for item in SystemComponentTaxOverride.objects.filter(
+                system_key=entry["key"]
+            )
         ]
     return {
         "key": entry["key"],
@@ -544,7 +558,9 @@ class SystemComponentView(APIView):
         blocked = require_perm(request, "payroll.view_allowance")
         if blocked:
             return blocked
-        return Response([_system_payload(entry) for entry in SYSTEM_COMPONENTS], status=200)
+        return Response(
+            [_system_payload(entry) for entry in SYSTEM_COMPONENTS], status=200
+        )
 
     def put(self, request, key):
         entry = next((item for item in SYSTEM_COMPONENTS if item["key"] == key), None)
@@ -565,7 +581,10 @@ class SystemComponentView(APIView):
         unknown = set(request.data.keys()) - allowed
         if unknown:
             return Response(
-                {"detail": _("Only %(fields)s can be changed.") % {"fields": ", ".join(sorted(allowed))}},
+                {
+                    "detail": _("Only %(fields)s can be changed.")
+                    % {"fields": ", ".join(sorted(allowed))}
+                },
                 status=400,
             )
         for field in editable_fields(key):
@@ -658,7 +677,9 @@ class FilingStatusView(APIView):
             return Response(_filing_payload(filing), status=200)
         pagination = HorillaPageNumberPagination()
         page = pagination.paginate_queryset(FilingStatus.objects.all(), request)
-        return pagination.get_paginated_response([_filing_payload(item) for item in page])
+        return pagination.get_paginated_response(
+            [_filing_payload(item) for item in page]
+        )
 
     def post(self, request):
         blocked = require_perm(request, "payroll.add_filingstatus")
@@ -705,8 +726,7 @@ def _save_filing(filing, data, created):
             return Response(
                 {
                     "tax_scale": [
-                        _("Choose one of: %(values)s.")
-                        % {"values": ", ".join(allowed)}
+                        _("Choose one of: %(values)s.") % {"values": ", ".join(allowed)}
                     ]
                 },
                 status=400,
@@ -727,7 +747,9 @@ def _save_filing(filing, data, created):
     if "python_code" in data:
         code = data.get("python_code") or ""
         if not python_formulas_enabled() and not same_formula(filing.python_code, code):
-            return Response({"python_code": [str(PYTHON_FORMULAS_OFF_MESSAGE)]}, status=403)
+            return Response(
+                {"python_code": [str(PYTHON_FORMULAS_OFF_MESSAGE)]}, status=403
+            )
         if code.strip():
             try:
                 validate_tax_code(code)
@@ -793,9 +815,7 @@ class TaxPackView(APIView):
         keys = request.data.get("keys")
         if keys is not None and not isinstance(keys, list):
             return Response({"keys": [_("Send a list of pack keys.")]}, status=400)
-        wanted = [
-            pack for pack in TAX_PACKS if keys is None or pack["key"] in keys
-        ]
+        wanted = [pack for pack in TAX_PACKS if keys is None or pack["key"] in keys]
         if any(pack.get("components") for pack in wanted):
             blocked = require_perm(request, "payroll.add_deduction")
             if blocked:
@@ -940,7 +960,9 @@ class ContractStatusView(APIView):
         if pk:
             contracts = Contract.objects.filter(pk=pk)
         else:
-            contracts = Contract.objects.filter(pk__in=as_id_list(request.data.get("ids")))
+            contracts = Contract.objects.filter(
+                pk__in=as_id_list(request.data.get("ids"))
+            )
         updated, skipped = [], []
         for contract in contracts:
             clash = (
@@ -957,7 +979,9 @@ class ContractStatusView(APIView):
             contract.contract_status = status
             contract.save()
             updated.append(contract.pk)
-        return Response({"updated": updated, "skipped": skipped, "status": status}, status=200)
+        return Response(
+            {"updated": updated, "skipped": skipped, "status": status}, status=200
+        )
 
 
 class ContractComponentView(APIView):
@@ -1052,7 +1076,9 @@ class LoanInstallmentView(APIView):
         if deduction is None:
             return Response({"detail": _("Installment not found.")}, status=404)
         if deduction.installment_payslip:
-            return Response({"detail": _("Cannot change a paid installment.")}, status=400)
+            return Response(
+                {"detail": _("Cannot change a paid installment.")}, status=400
+            )
         before = deductions.filter(one_time_date__lt=deduction.one_time_date)
         after = deductions.filter(one_time_date__gt=deduction.one_time_date)
         total_sum = before.aggregate(Sum("amount"))["amount__sum"] or 0
@@ -1130,7 +1156,9 @@ class ReimbursementCommentView(APIView):
             return blocked
         employee = getattr(request.user, "employee_get", None)
         if employee is None:
-            return Response({"detail": _("No employee is linked to this user.")}, status=400)
+            return Response(
+                {"detail": _("No employee is linked to this user.")}, status=400
+            )
         text = (request.data.get("comment") or "").strip()
         if not text:
             return Response({"comment": [_("Comment is required.")]}, status=400)
@@ -1211,7 +1239,9 @@ class EncashmentSettingsView(APIView):
             row.employees.set(as_id_list(request.data.get("employee_ids")))
         if "department_ids" in request.data:
             row.department.set(
-                Department.objects.filter(pk__in=as_id_list(request.data.get("department_ids")))
+                Department.objects.filter(
+                    pk__in=as_id_list(request.data.get("department_ids"))
+                )
             )
         if "job_position_ids" in request.data:
             row.job_position.set(

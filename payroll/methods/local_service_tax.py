@@ -98,7 +98,9 @@ def contract_for(employee):
         return None
     return (
         forced_contract(employee)
-        or Contract.objects.filter(employee_id=employee, contract_status="active").first()
+        or Contract.objects.filter(
+            employee_id=employee, contract_status="active"
+        ).first()
     )
 
 

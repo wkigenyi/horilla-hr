@@ -126,7 +126,9 @@ class PayslipTests(TestCase):
         ), patch(
             "payroll.methods.methods.get_daily_salary",
             return_value={"day_wage": per_day},
-        ), patch("payroll.methods.methods.get_leaves", return_value=EMPTY_LEAVES):
+        ), patch(
+            "payroll.methods.methods.get_leaves", return_value=EMPTY_LEAVES
+        ):
             data = payroll_calculation(
                 self.employee, date(year, number, 1), date(year, number, last)
             )
@@ -134,7 +136,9 @@ class PayslipTests(TestCase):
 
     def lst(self, payslip):
         return sum(
-            line["amount"] for line in payslip["pretax_deductions"] if line["title"] == "LST"
+            line["amount"]
+            for line in payslip["pretax_deductions"]
+            if line["title"] == "LST"
         )
 
     def test_july_takes_an_instalment_and_paye_falls_by_its_tax(self):

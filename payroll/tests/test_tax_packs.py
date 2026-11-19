@@ -254,8 +254,14 @@ class UgandaPackTests(TestCase):
         self.assertEqual(
             FilingStatus.objects.filter(filing_status__startswith="Uganda").count(), 1
         )
-        self.assertEqual(TaxBracket.objects.filter(filing_status_id=self.paye()).count(), 5)
-        for title in ("Employee NSSF Contribution", "Employer NSSF Contribution", "LST"):
+        self.assertEqual(
+            TaxBracket.objects.filter(filing_status_id=self.paye()).count(), 5
+        )
+        for title in (
+            "Employee NSSF Contribution",
+            "Employer NSSF Contribution",
+            "LST",
+        ):
             self.assertEqual(Deduction.objects.filter(title=title).count(), 1, title)
 
     def test_existing_components_with_the_same_title_are_kept_as_they_are(self):
@@ -283,7 +289,9 @@ class UgandaPackTests(TestCase):
         created = load_tax_packs(["ug_paye"], company=self.company)
         self.assertIn("Currency UGX", created)
         settings = PayrollSettings.objects.get(company_id=self.company)
-        self.assertEqual((settings.currency_symbol, settings.position), ("UGX", "prefix"))
+        self.assertEqual(
+            (settings.currency_symbol, settings.position), ("UGX", "prefix")
+        )
 
     def test_currency_is_left_alone_without_a_company(self):
         from payroll.models.tax_models import PayrollSettings

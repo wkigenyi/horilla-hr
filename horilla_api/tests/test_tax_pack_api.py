@@ -19,7 +19,9 @@ class TaxPackApiTests(TestCase):
         self.client = APIClient()
         self.company = make_company("Pack Api Co")
         self.user = make_user("pack_api", password="secret123", is_superuser=True)
-        make_employee(company=self.company, email="pack_api@test.horilla", user=self.user)
+        make_employee(
+            company=self.company, email="pack_api@test.horilla", user=self.user
+        )
         # Drop the cached "no employee" the user picked up before it had one.
         self.user.refresh_from_db()
         self.client.force_authenticate(user=self.user)
@@ -72,7 +74,9 @@ class TaxPackApiTests(TestCase):
 
     def test_without_permission_to_change_currency_the_uganda_pack_is_refused(self):
         user = make_user("pack_limited", password="secret123")
-        make_employee(company=self.company, email="pack_limited@test.horilla", user=user)
+        make_employee(
+            company=self.company, email="pack_limited@test.horilla", user=user
+        )
         user.refresh_from_db()
         user.user_permissions.add(
             *Permission.objects.filter(

@@ -328,7 +328,9 @@ COMPONENT_LIBRARY = [
         "group": _("Uganda"),
         "kind": DEDUCTION,
         "name": "Employer NSSF Contribution",
-        "summary": _("The employer's 10% of gross pay. Nothing comes off the employee."),
+        "summary": _(
+            "The employer's 10% of gross pay. Nothing comes off the employee."
+        ),
         "note": _(
             "Shown as a line so the employer's share appears on the payslip "
             "and in the contributions report."

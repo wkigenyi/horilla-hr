@@ -4978,6 +4978,8 @@ class PayslipAutoGenerate(models.Model):
         return f"{self.generate_day} | {self.company_id} "
 
 
+from payroll.models.accounting_gl import PayrollGLMapping  # noqa: E402,F401
+
 # Pay periods and payroll runs. Imported here rather than defined here because
 # models.py is already four thousand lines, and because a run is a different
 # subject from a component: see payroll/models/payroll_run.py.
@@ -4986,4 +4988,3 @@ from payroll.models.payroll_batch import (  # noqa: E402,F401
     PayrollBatch,
     PayrollBatchLine,
 )
-from payroll.models.accounting_gl import PayrollGLMapping  # noqa: E402,F401

@@ -55,7 +55,9 @@ class FilingTaxScaleApiTests(TestCase):
         self.assertEqual(response.data["tax_scale"], "period")
         self.assertEqual(response.data["band_unit"], "month")
         self.assertIn("monthly", response.data["steps"][0])
-        self.assertFalse(any("yearly figure" in step for step in response.data["steps"]))
+        self.assertFalse(
+            any("yearly figure" in step for step in response.data["steps"])
+        )
         self.filing.refresh_from_db()
         self.assertEqual(self.filing.tax_scale, "period")
 

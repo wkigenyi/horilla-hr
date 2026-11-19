@@ -90,7 +90,9 @@ class PayrollApiTests(TestCase):
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["blocked_count"], 1)
         self.assertTrue(response.data["rows"][0]["blocked"])
-        self.assertEqual(response.data["rows"][0]["problems"][0]["severity"], "blocking")
+        self.assertEqual(
+            response.data["rows"][0]["problems"][0]["severity"], "blocking"
+        )
 
     def test_batch_refuses_approval_until_generation_finishes(self):
         self._contract()
@@ -200,9 +202,7 @@ class PayrollApiTests(TestCase):
 
     def test_structures_are_company_scoped(self):
         clerk = make_user("payroll_clerk", password="secret123")
-        make_employee(
-            company=self.company, email="clerk@test.horilla", user=clerk
-        )
+        make_employee(company=self.company, email="clerk@test.horilla", user=clerk)
         clerk.user_permissions.add(
             Permission.objects.get(
                 codename="view_salarystructure", content_type__app_label="payroll"
@@ -431,9 +431,7 @@ class PayrollApiTests(TestCase):
         structure = SalaryStructure.objects.create(
             title="Strict", company_id=self.company
         )
-        other = SalaryStructure.objects.create(
-            title="Other", company_id=self.company
-        )
+        other = SalaryStructure.objects.create(title="Other", company_id=self.company)
         taken = make_employee(
             company=self.company, email="bad_taken@test.horilla", first_name="Taken"
         )
@@ -451,7 +449,9 @@ class PayrollApiTests(TestCase):
         self.assertEqual(response.status_code, 400, response.data)
         errors = response.data["fieldErrors"]["employee_ids"]
         self.assertTrue(any("no active contract" in msg for msg in errors))
-        self.assertTrue(any("already on another salary structure" in msg for msg in errors))
+        self.assertTrue(
+            any("already on another salary structure" in msg for msg in errors)
+        )
 
     def test_salary_structure_assignable_requires_change_permission(self):
         structure = SalaryStructure.objects.create(

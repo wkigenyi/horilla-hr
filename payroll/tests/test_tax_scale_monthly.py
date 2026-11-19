@@ -107,4 +107,3 @@ class MonthlyScaleTests(TestCase):
         )
         # Monthly bands under annualisation overcharge; this pins old behaviour.
         self.assertAlmostEqual(tax, 1_908_500, 2)
-

@@ -215,9 +215,7 @@ def pack_rows(loaded_names=frozenset()):
                 "cess_percent": pack.get("cess_percent", 0) or 0,
                 "already_loaded": pack["name"] in loaded_names,
                 "tax_scale": pack.get("tax_scale", "annual"),
-                "components": [
-                    str(entry["name"]) for entry in _pack_components(pack)
-                ],
+                "components": [str(entry["name"]) for entry in _pack_components(pack)],
                 "currency": pack.get("currency"),
             }
         )
