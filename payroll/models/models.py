@@ -187,6 +187,10 @@ class FilingStatus(HorillaModel):
         ("gross_pay", _("Gross Pay")),
         ("taxable_gross_pay", _("Taxable Gross Pay")),
     ]
+    TAX_SCALE_CHOICES = [
+        ("annual", _("Annual (scale period income to a year)")),
+        ("period", _("Monthly (brackets are per month, no annualisation)")),
+    ]
     filing_status = models.CharField(
         max_length=100,
         blank=False,
@@ -199,6 +203,23 @@ class FilingStatus(HorillaModel):
         blank=False,
         default="taxable_gross_pay",
         verbose_name=_("Based on"),
+    )
+    # annual: US/India-style withholding — scale the period figure to a year,
+    # run slabs, bring one period's share back. period: monthly PAYE schedules
+    # (e.g. Uganda) — slabs are already in period units, so tax this period's
+    # taxable pay directly. Default annual keeps existing tenants unchanged.
+    tax_scale = models.CharField(
+        max_length=16,
+        choices=TAX_SCALE_CHOICES,
+        default="annual",
+        verbose_name=_("Tax scale"),
+        help_text=_(
+            "Annual scales this period's income to a year, taxes it, then "
+            "brings one period's share back. Monthly treats the brackets as "
+            "monthly amounts and taxes each month's pay on its own — use that "
+            "for monthly PAYE schedules such as Uganda. Weekly and "
+            "semi-monthly pay is taxed at its monthly equivalent."
+        ),
     )
     use_py = models.BooleanField(verbose_name=_("Python Code"), default=False)
     python_code = models.TextField(null=True)
@@ -268,10 +289,24 @@ class FilingStatus(HorillaModel):
         tax_calc.compute_yearly_tax), so the screen answers the question the
         configuration raises.
         """
-        steps = [
-            _("Start from the employee's %(basis)s for the period, scaled to a year.")
-            % {"basis": self.get_based_on_display()}
-        ]
+        if getattr(self, "tax_scale", "annual") == "period":
+            steps = [
+                _(
+                    "Start from the employee's %(basis)s for the month "
+                    "(brackets are monthly — no annualisation). Weekly or "
+                    "semi-monthly pay is first scaled to its monthly "
+                    "equivalent, and the tax scaled back to the period."
+                )
+                % {"basis": self.get_based_on_display()}
+            ]
+        else:
+            steps = [
+                _(
+                    "Start from the employee's %(basis)s for the period, "
+                    "scaled to a year."
+                )
+                % {"basis": self.get_based_on_display()}
+            ]
 
         if self.standard_deduction:
             steps.append(
@@ -318,7 +353,8 @@ class FilingStatus(HorillaModel):
                 % {"percent": f"{self.cess_percent:g}"}
             )
 
-        steps.append(_("Scale the yearly figure back down to this pay period."))
+        if getattr(self, "tax_scale", "annual") != "period":
+            steps.append(_("Scale the yearly figure back down to this pay period."))
         return steps
 
     def get_rules_url(self):
@@ -588,6 +624,25 @@ class Contract(HorillaModel):
             "On: unpaid days come out of the figure tax is worked out on, so "
             "the employee is not taxed on pay they did not receive. Off: they "
             "are taxed as though they had been paid it."
+        ),
+    )
+    # Uganda Local Service Tax; read by payroll/methods/local_service_tax.py.
+    lst_exempt = models.BooleanField(
+        default=False,
+        verbose_name=_("Exempt From LST"),
+        help_text=_(
+            "Members of the UPDF, police, prisons and local defence forces, "
+            "and accredited diplomats, pay no Local Service Tax."
+        ),
+    )
+    lst_paid_elsewhere_fy = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        verbose_name=_("LST Paid Elsewhere For FY"),
+        help_text=_(
+            "The year a financial year starts in, e.g. 2026 for 2026/27, when "
+            "this person already paid that year's LST through another "
+            "employer. Nothing is deducted for that year."
         ),
     )
     DAILY_LEAVE_DIVISOR_CHOICES = [
@@ -2285,7 +2340,9 @@ class Allowance(HorillaModel):
                     )
                 )
         if not self.is_fixed and self.based_on and self.based_on == "basic_pay":
-            if not self.rate:
+            # rate 0 is valid (employer-only / zero employee share); only
+            # a missing rate is refused.
+            if self.rate is None:
                 raise ValidationError(
                     _("Rate must be specified for allowances based on basic pay.")
                 )
@@ -2414,6 +2471,9 @@ class Deduction(HorillaModel):
         # phase, which the form refuses.
         ("component", _("Percentage of Another Component")),
         ("formula", _("Custom Formula")),
+        # Annual amount by monthly income band, taken July to October; see
+        # payroll/methods/local_service_tax.py.
+        ("uganda_lst", _("Uganda LST bands")),
     ]
 
     exceed_choice = [
@@ -2979,12 +3039,13 @@ class Deduction(HorillaModel):
         # A formula carries its own arithmetic ("(BASIC - LOP) * 0.12") --
         # rate is meaningless there, unlike every other based_on option here,
         # which is a plain "rate% of X" and has nothing else to say the
-        # percentage.
+        # percentage. rate 0 is valid (employer-only contribution); only a
+        # missing rate is refused.
         if (
             not self.is_fixed
             and self.based_on
             and self.based_on != "formula"
-            and not self.rate
+            and self.rate is None
         ):
             raise ValidationError(
                 _(

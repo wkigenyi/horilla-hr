@@ -117,6 +117,16 @@ class RateStillWorksTests(Fixture):
         row = self.contribution(self.payslip(), "Provident Fund")
         self.assertNotIn("employer_contribution_amount", row)
 
+    def test_zero_employee_rate_still_pays_employer_share_of_basic(self):
+        """Employer % is of the basis figure, not of the employee's zero share."""
+        self.deduction(rate=0.0, employer_rate=10.0)
+        row = self.contribution(self.payslip(), "Provident Fund")
+
+        self.assertEqual(row["amount"], 0)
+        self.assertAlmostEqual(
+            row["employer_contribution_amount"], 30000.0 * 0.10, places=2
+        )
+
 
 class FormulaTests(Fixture):
     def test_the_employer_share_can_be_a_formula(self):

@@ -78,10 +78,15 @@ class LibraryDataTests(TestCase):
                 None,
                 "balance",
                 "formula",
+                "uganda_lst",
             ):
                 continue
             with self.subTest(key=entry["key"]):
-                self.assertTrue(fields.get("rate"), entry["key"])
+                # An employer-only line (an NSSF employer share) takes nothing
+                # from the employee but still costs the employer its rate.
+                self.assertTrue(
+                    fields.get("rate") or fields.get("employer_rate"), entry["key"]
+                )
 
     def test_a_fixed_entry_always_carries_an_amount(self):
         for entry in COMPONENT_LIBRARY:

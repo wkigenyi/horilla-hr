@@ -132,6 +132,18 @@ class FormulaDeductionValidationTests(TestCase):
             title="Custom",
             is_fixed=False,
             based_on="basic_pay",
+            rate=None,
         )
         with self.assertRaises(ValidationError):
             deduction.full_clean(exclude=["created_by", "modified_by"])
+
+    def test_a_zero_employee_rate_is_allowed(self):
+        """0% employee / N% employer is a real contribution shape."""
+        deduction = Deduction(
+            title="Employer only",
+            is_fixed=False,
+            based_on="basic_pay",
+            rate=0,
+            employer_rate=10,
+        )
+        deduction.full_clean(exclude=["created_by", "modified_by"])

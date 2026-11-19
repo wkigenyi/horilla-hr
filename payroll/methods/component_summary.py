@@ -98,6 +98,9 @@ def calculation_summary(component):
     if based_on == "balance":
         return str(_("Balance of CTC"))
 
+    if based_on == "uganda_lst":
+        return str(_("Uganda LST bands, July to October"))
+
     if based_on in AGGREGATE_NAMES:
         return f"{_rate(rate)} {_('of')} {AGGREGATE_NAMES[based_on]}"
 

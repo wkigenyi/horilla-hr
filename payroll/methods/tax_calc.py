@@ -44,14 +44,13 @@ class TaxComputationError(Exception):
 
 def compute_yearly_tax(filing, yearly_income, employee=None):
     """
-    Tax on a yearly income under ``filing``, plus a breakdown of how it got there.
+    Tax ``income`` under ``filing``'s bracket (or formula) scale, plus a breakdown.
 
-    This is the whole of what a filing status *means*, and it is deliberately
-    the only implementation: ``calculate_taxable_amount`` calls it for real
-    payslips and the configuration preview calls it for a hypothetical income.
-    A preview that computes its own way agrees with payroll right up until the
-    day it doesn't, and then it is actively misleading about a number people
-    are paid by.
+    The argument is named ``yearly_income`` for historical reasons; callers pass
+    income already expressed in the same units as the filing's slabs — yearly
+    when ``tax_scale`` is annual, period when it is period. This is the only
+    slab/formula implementation: ``period_tax`` and the configuration preview
+    both go through it so charged tax and explanations cannot drift apart.
 
     Order matters and is not arbitrary:
 
@@ -251,6 +250,38 @@ PERIODS_PER_YEAR = {"monthly": 12, "semi_monthly": 24, "weekly": 52}
 _MAX_PERIOD_DAYS = {"monthly": 31, "semi_monthly": 16, "weekly": 7}
 
 
+def monthly_scale_tax(filing, income, pay_frequency, employee=None):
+    """
+    Tax for one payslip under a ``period`` (monthly) filing status.
+
+    The brackets are monthly, as Uganda's PAYE bands are. A monthly payslip is
+    taxed on its own pay, with no annualisation: a part month or a bonus month
+    is taxed on what was actually paid that month, and a 26th-to-25th cycle is
+    still one month.
+
+    A weekly or semi-monthly payslip (casual workers paid weekly, say) is
+    taxed at the monthly rate of pay it represents: its pay is scaled up to a
+    monthly equivalent, taxed on the monthly brackets, and that tax is scaled
+    back down to the period. Taxing a week's pay directly against monthly
+    brackets would charge a week as if it were a whole month's pay, and so
+    under-withhold. With piecewise-linear brackets this is the same as
+    converting the brackets themselves to weekly units (monthly x 12 / 52).
+
+    The frequency comes from the contract, not from the payslip's dates, so a
+    pay cycle that crosses a month end is still one month.
+
+    Returns ``(period_tax, breakdown, monthly_income, monthly_tax, periods)``.
+    """
+    periods = PERIODS_PER_YEAR.get(pay_frequency or "monthly", 12)
+    to_month = periods / 12
+    monthly_income = round(float(income) * to_month, 2)
+    monthly_tax, breakdown = compute_yearly_tax(
+        filing, monthly_income, employee=employee
+    )
+    tax = float(monthly_tax or 0) / to_month
+    return tax, breakdown, monthly_income, float(monthly_tax or 0), periods
+
+
 def periods_in_year(pay_frequency, start_date, end_date):
     """
     The pay periods per year this payslip's tax is annualised by, or None when
@@ -283,10 +314,19 @@ def period_tax(filing, income, start_date, end_date, employee=None, pay_frequenc
     ``filing.based_on``). Split out of ``calculate_taxable_amount`` so a payslip
     whose figures were edited by hand can have its tax worked out the same way
     the engine did, instead of keeping the number from before the edit.
+
+    When ``filing.tax_scale`` is ``period``, brackets are monthly (monthly
+    PAYE such as Uganda's): see ``monthly_scale_tax``. Otherwise annualise,
+    tax, and bring one period's share back (US/India-style withholding).
     """
     tax_brackets = TaxBracket.objects.filter(filing_status_id=filing).order_by(
         "min_income"
     )
+    if getattr(filing, "tax_scale", "annual") == "period":
+        if not (tax_brackets.exists() or filing.use_py):
+            return 0.0
+        return monthly_scale_tax(filing, income, pay_frequency, employee=employee)[0]
+
     num_days = (end_date - start_date).days + 1
     year = end_date.year
     check_start_date = datetime.date(year, 1, 1)
@@ -328,11 +368,36 @@ def explain_period_tax(
     """
     Everything between a period's taxable pay and its tax, step by step.
 
-    Built from the same pieces ``period_tax`` is: ``periods_in_year`` for the
-    annualisation and ``compute_yearly_tax`` for the yearly figure, so what is
-    laid out here cannot differ from what was charged. Used to show someone how
-    their Income Tax line came to be.
+    Built from the same pieces ``period_tax`` is, so what is laid out here
+    cannot differ from what was charged. Used to show someone how their
+    Income Tax line came to be.
     """
+    income = round(float(income), 2)
+    if getattr(filing, "tax_scale", "annual") == "period":
+        tax, breakdown, monthly_income, monthly_tax, periods = monthly_scale_tax(
+            filing, income, pay_frequency, employee=employee
+        )
+        return {
+            "filing_status": filing.filing_status,
+            "based_on": filing.based_on,
+            "tax_scale": "period",
+            "income": income,
+            "method": "monthly" if periods == 12 else "monthly_equivalent",
+            "periods": periods,
+            "days": (end_date - start_date).days + 1,
+            "year_days": None,
+            # The figure the (monthly) brackets were applied to. Kept under
+            # yearly_income so existing readers of this dict keep working;
+            # monthly_income says what it actually is.
+            "yearly_income": monthly_income,
+            "monthly_income": monthly_income,
+            "monthly_tax": round(float(monthly_tax), 2),
+            "breakdown": breakdown,
+            "yearly_tax": round(float(monthly_tax), 2),
+            "period_tax": round(float(tax), 2),
+            "rules_pk": filing.pk,
+        }
+
     periods = periods_in_year(pay_frequency, start_date, end_date)
     num_days = (end_date - start_date).days + 1
     total_days = 366 if _is_leap(end_date.year) else 365
@@ -351,7 +416,8 @@ def explain_period_tax(
     return {
         "filing_status": filing.filing_status,
         "based_on": filing.based_on,
-        "income": round(float(income), 2),
+        "tax_scale": "annual",
+        "income": income,
         "method": method,
         "periods": periods,
         "days": num_days,

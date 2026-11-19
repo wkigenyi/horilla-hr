@@ -152,6 +152,35 @@ TAX_PACKS = [
         ],
     },
     {
+        "key": "ug_paye",
+        "country": _("Uganda"),
+        "name": "Uganda PAYE (FY 2025/26)",
+        "based_on": "taxable_gross_pay",
+        # URA publishes the resident bands per month, so they are entered as
+        # monthly figures rather than restated as a year.
+        "tax_scale": "period",
+        "description": _(
+            "Resident individual rates, charged on monthly pay. The 30% band "
+            "runs up to 10,000,000 a month and everything above it pays 40% "
+            "(30% plus the additional 10%). Also adds NSSF at 5% for the "
+            "employee and 10% for the employer on gross pay, Local Service "
+            "Tax by income band (July to October, before PAYE), and sets the "
+            "company currency to UGX. Non-resident "
+            "rates differ. Verify against the current Income Tax Act before "
+            "use."
+        ),
+        "slabs": [
+            (0, 235000, 0),
+            (235000, 335000, 10),
+            (335000, 410000, 20),
+            (410000, 10000000, 30),
+            (10000000, None, 40),
+        ],
+        # Keys into payroll.component_library, loaded alongside the slabs.
+        "components": ["ug_nssf_employee", "ug_nssf_employer", "ug_lst"],
+        "currency": {"symbol": "UGX", "position": "prefix"},
+    },
+    {
         "key": "flat_10",
         "country": _("Generic"),
         "name": "Flat 10%",
@@ -183,21 +212,67 @@ def pack_rows(loaded_names=frozenset()):
                 "top_rate": max(rate for _lo, _hi, rate in pack["slabs"]),
                 "standard_deduction": pack.get("standard_deduction", 0),
                 "has_rebate": pack.get("rebate_income_limit") is not None,
-                "cess_percent": pack.get("cess_percent", 0),
+                "cess_percent": pack.get("cess_percent", 0) or 0,
                 "already_loaded": pack["name"] in loaded_names,
+                "tax_scale": pack.get("tax_scale", "annual"),
+                "components": [
+                    str(entry["name"]) for entry in _pack_components(pack)
+                ],
+                "currency": pack.get("currency"),
             }
         )
     return rows
 
 
-def load_tax_packs(keys=None):
+def _pack_components(pack):
+    from payroll.component_library import COMPONENT_LIBRARY
+
+    keys = pack.get("components") or []
+    by_key = {entry["key"]: entry for entry in COMPONENT_LIBRARY}
+    return [by_key[key] for key in keys if key in by_key]
+
+
+def packs_setting_currency(keys=None):
+    """The requested packs that would change the company currency."""
+    wanted = set(keys) if keys is not None else None
+    return [
+        pack
+        for pack in TAX_PACKS
+        if pack.get("currency") and (wanted is None or pack["key"] in wanted)
+    ]
+
+
+def _set_currency(company, currency):
+    from payroll.models.tax_models import PayrollSettings
+
+    settings, _created = PayrollSettings.objects.get_or_create(company_id=company)
+    if (
+        settings.currency_symbol == currency["symbol"]
+        and settings.position == currency["position"]
+    ):
+        return False
+    settings.currency_symbol = currency["symbol"]
+    settings.position = currency["position"]
+    settings.save()
+    PayrollSettings.forget_remembered()
+    return True
+
+
+def load_tax_packs(keys=None, company=None):
     """
     Create a FilingStatus (with slabs and adjustments) for each requested pack.
 
     Keyed on name via get_or_create, so re-running never duplicates and never
     overwrites an admin's edits to a pack they have already tuned. Returns the
     names actually created.
+
+    A pack may also name components from the component library and a company
+    currency. Components are matched on title like the library itself, so an
+    existing one with the same name is kept as it is rather than duplicated.
+    The currency is only set when a company is given; without one there is no
+    settings row it could belong to.
     """
+    from payroll.component_library import load_components
     from payroll.models.models import FilingStatus
     from payroll.models.tax_models import TaxBracket
 
@@ -214,22 +289,30 @@ def load_tax_packs(keys=None):
                 "based_on": pack["based_on"],
                 "description": pack["description"],
                 "use_py": False,
+                "tax_scale": pack.get("tax_scale", "annual"),
                 "standard_deduction": pack.get("standard_deduction", 0) or 0,
                 "rebate_income_limit": pack.get("rebate_income_limit"),
                 "rebate_max_amount": pack.get("rebate_max_amount"),
                 "cess_percent": pack.get("cess_percent", 0) or 0,
             },
         )
-        if not was_created:
-            continue
+        if was_created:
+            for lower, upper, rate in pack["slabs"]:
+                TaxBracket.objects.create(
+                    filing_status_id=filing_status,
+                    min_income=lower,
+                    max_income=upper,
+                    tax_rate=rate,
+                )
+            created.append(pack["name"])
 
-        for lower, upper, rate in pack["slabs"]:
-            TaxBracket.objects.create(
-                filing_status_id=filing_status,
-                min_income=lower,
-                max_income=upper,
-                tax_rate=rate,
-            )
-        created.append(pack["name"])
+        # Done even when the filing status already existed, so a pack whose
+        # first load was interrupted can be finished by loading it again.
+        if pack.get("components"):
+            for component in load_components(pack["components"]):
+                created.append(component.title)
+        if pack.get("currency") and company is not None:
+            if _set_currency(company, pack["currency"]):
+                created.append(f"Currency {pack['currency']['symbol']}")
 
     return created

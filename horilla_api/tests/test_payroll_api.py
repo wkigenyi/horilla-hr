@@ -478,3 +478,81 @@ class PayrollApiTests(TestCase):
             format="json",
         )
         self.assertEqual(employees.status_code, 403, employees.data)
+
+    def test_deduction_allows_zero_employee_rate_with_employer_share(self):
+        created = self.client.post(
+            "/api/v1/payroll/deduction",
+            {
+                "title": "Employer NSSF",
+                "is_fixed": False,
+                "based_on": "basic_pay",
+                "rate": 0,
+                "employer_rate": 10,
+                "include_active_employees": True,
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, 200, created.data)
+        self.assertEqual(created.data["rate"], 0)
+        self.assertEqual(created.data["employer_rate"], 10)
+        updated = self.client.put(
+            f"/api/v1/payroll/deduction/{created.data['id']}",
+            {
+                "title": "Employer NSSF",
+                "is_fixed": False,
+                "based_on": "basic_pay",
+                "rate": 0,
+                "employer_rate": 12,
+                "include_active_employees": True,
+            },
+            format="json",
+        )
+        self.assertEqual(updated.status_code, 200, updated.data)
+        self.assertEqual(updated.data["employer_rate"], 12)
+
+    def test_allowance_allows_zero_rate_on_basic_pay(self):
+        created = self.client.post(
+            "/api/v1/payroll/allowance",
+            {
+                "title": "Zero share",
+                "is_fixed": False,
+                "based_on": "basic_pay",
+                "rate": 0,
+                "include_active_employees": True,
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, 200, created.data)
+        self.assertEqual(created.data["rate"], 0)
+        updated = self.client.put(
+            f"/api/v1/payroll/allowance/{created.data['id']}",
+            {
+                "title": "Zero share",
+                "is_fixed": False,
+                "based_on": "basic_pay",
+                "rate": 0,
+                "include_active_employees": True,
+            },
+            format="json",
+        )
+        self.assertEqual(updated.status_code, 200, updated.data)
+
+    def test_deduction_still_requires_a_rate_when_null(self):
+        # Deduction.rate defaults to 0.0 when omitted; only an explicit null
+        # is "missing" after the clean() check switched from falsy to is None.
+        response = self.client.post(
+            "/api/v1/payroll/deduction",
+            {
+                "title": "Missing rate",
+                "is_fixed": False,
+                "based_on": "basic_pay",
+                "rate": None,
+                "include_active_employees": True,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertIn(
+            "Employee rate must be specified",
+            str(response.data),
+        )

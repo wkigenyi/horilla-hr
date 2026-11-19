@@ -192,3 +192,110 @@ class TaxPackViewTests(TestCase):
     def test_loading_nothing_is_refused(self):
         self.client.post("/payroll/load-tax-pack/", {}, **self.hx)
         self.assertEqual(FilingStatus.objects.count(), 0)
+
+
+class UgandaPackTests(TestCase):
+    """
+    The Uganda pack: monthly PAYE bands, NSSF on gross pay, an LST placeholder
+    and the company currency. Expected tax is worked by hand from the URA
+    resident bands, not read back from the engine.
+    """
+
+    def setUp(self):
+        self.company = make_company("Kampala Co")
+
+    def paye(self):
+        return FilingStatus.objects.get(filing_status="Uganda PAYE (FY 2025/26)")
+
+    def test_paye_is_monthly_and_matches_hand_worked_figures(self):
+        load_tax_packs(["ug_paye"])
+        status = self.paye()
+        self.assertEqual(status.tax_scale, "period")
+        # 10,000 + 15,000 + 30% of 4,590,000
+        self.assertAlmostEqual(
+            preview_yearly_tax(status, 5_000_000)["tax"], 1_402_000, places=2
+        )
+        # 2,902,000 up to 10M, then 40% of the 2M above it
+        self.assertAlmostEqual(
+            preview_yearly_tax(status, 12_000_000)["tax"], 3_702_000, places=2
+        )
+        self.assertAlmostEqual(preview_yearly_tax(status, 235_000)["tax"], 0, places=2)
+
+    def test_nssf_is_on_gross_pay_and_after_tax(self):
+        from payroll.models.models import Deduction
+
+        load_tax_packs(["ug_paye"])
+        employee = Deduction.objects.get(title="Employee NSSF Contribution")
+        employer = Deduction.objects.get(title="Employer NSSF Contribution")
+        for row in (employee, employer):
+            self.assertEqual(row.based_on, "gross_pay")
+            self.assertFalse(row.is_pretax)
+            self.assertFalse(row.is_fixed)
+        self.assertEqual((employee.rate, employee.employer_rate), (5.0, 0.0))
+        self.assertEqual((employer.rate, employer.employer_rate), (0.0, 10.0))
+
+    def test_lst_loads_as_banded_and_before_tax(self):
+        from payroll.models.models import Deduction
+
+        load_tax_packs(["ug_paye"])
+        lst = Deduction.objects.get(title="LST")
+        self.assertFalse(lst.is_fixed)
+        self.assertEqual(lst.based_on, "uganda_lst")
+        # Allowable for PAYE, so it reduces taxable pay.
+        self.assertTrue(lst.is_pretax)
+
+    def test_loading_again_duplicates_nothing(self):
+        from payroll.models.models import Deduction
+        from payroll.models.tax_models import TaxBracket
+
+        first = load_tax_packs(["ug_paye"], company=self.company)
+        self.assertIn("Uganda PAYE (FY 2025/26)", first)
+        self.assertEqual(load_tax_packs(["ug_paye"], company=self.company), [])
+        self.assertEqual(
+            FilingStatus.objects.filter(filing_status__startswith="Uganda").count(), 1
+        )
+        self.assertEqual(TaxBracket.objects.filter(filing_status_id=self.paye()).count(), 5)
+        for title in ("Employee NSSF Contribution", "Employer NSSF Contribution", "LST"):
+            self.assertEqual(Deduction.objects.filter(title=title).count(), 1, title)
+
+    def test_existing_components_with_the_same_title_are_kept_as_they_are(self):
+        from payroll.models.models import Deduction
+
+        Deduction.objects.create(title="LST", is_fixed=True, amount=25000)
+        Deduction.objects.create(
+            title="Employee NSSF Contribution",
+            is_fixed=False,
+            based_on="basic_pay",
+            rate=5,
+        )
+        created = load_tax_packs(["ug_paye"])
+        self.assertNotIn("LST", created)
+        self.assertNotIn("Employee NSSF Contribution", created)
+        self.assertEqual(Deduction.objects.get(title="LST").amount, 25000)
+        self.assertEqual(
+            Deduction.objects.get(title="Employee NSSF Contribution").based_on,
+            "basic_pay",
+        )
+
+    def test_currency_becomes_ugx_for_the_company(self):
+        from payroll.models.tax_models import PayrollSettings
+
+        created = load_tax_packs(["ug_paye"], company=self.company)
+        self.assertIn("Currency UGX", created)
+        settings = PayrollSettings.objects.get(company_id=self.company)
+        self.assertEqual((settings.currency_symbol, settings.position), ("UGX", "prefix"))
+
+    def test_currency_is_left_alone_without_a_company(self):
+        from payroll.models.tax_models import PayrollSettings
+
+        before = PayrollSettings.objects.count()
+        created = load_tax_packs(["ug_paye"])
+        self.assertNotIn("Currency UGX", created)
+        self.assertEqual(PayrollSettings.objects.count(), before)
+
+    def test_other_packs_add_no_components(self):
+        from payroll.models.models import Deduction
+
+        before = Deduction.objects.count()
+        load_tax_packs(["in_new"])
+        self.assertEqual(Deduction.objects.count(), before)

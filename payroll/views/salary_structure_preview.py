@@ -15,7 +15,7 @@ Two things it does not show, and says it does not show:
 
   * income tax — unless a filing status is chosen for the example. A contract
     carries one in real life; here it is picked, and the tax is worked out by
-    the same compute_yearly_tax a payslip uses.
+    the same period_tax path a payslip uses (respecting filing.tax_scale).
   * components that measure attendance — overtime, shift and work-type rates
     need a real employee's hours. Reported per-line rather than guessed at.
 
@@ -29,9 +29,11 @@ from horilla.decorators import hx_request_required, login_required, permission_r
 from payroll.methods.component_engine import accumulate, new_context, record
 from payroll.methods.component_formula import ComponentFormulaError
 from payroll.methods.employer_cost import employer_amount
-from payroll.methods.methods import compute_yearly_taxable_amount
+from datetime import date
+from copy import copy
+
 from payroll.methods.proration import flat_amount
-from payroll.methods.tax_calc import TaxComputationError, compute_yearly_tax
+from payroll.methods.tax_calc import TaxComputationError, explain_period_tax, period_tax
 from payroll.models.models import FilingStatus, SalaryStructure
 
 # A month with nothing unusual about it: 30 calendar days, 22 of them working.
@@ -392,37 +394,81 @@ def build_salary_structure_preview(
         }
         base, base_label = bases.get(filing.based_on, (basic_pay, _("basic pay")))
 
-        # Annualised and brought back the way calculate_taxable_amount does it:
-        # by calendar days, so a part month is taxed as a part month. Through
-        # compute_yearly_taxable_amount as well, because that is the hook a
-        # deployment overrides to change the annualisation — skipping it would
-        # make the preview disagree with the payslip on exactly the sites that
-        # customised it.
+        # Same path as payslips: period_tax (which respects filing.tax_scale).
+        # Sample month dates match sample_day_dict so annual mode still
+        # annualises a single monthly period by ×12.
         period_days = max(SAMPLE_CALENDAR_DAYS - lop_days, 1)
-        yearly_base = compute_yearly_taxable_amount(base, base / period_days * 365)
+        sample_start = date(2026, 4, 1)
+        sample_end = date(2026, 4, period_days)
         try:
-            yearly_tax, breakdown = compute_yearly_tax(filing, round(yearly_base, 2))
-            period_tax = yearly_tax / 365 * period_days
-            tax_line = {
-                "code": "TAX",
-                "title": str(filing),
-                "calculation": str(
+            charged = period_tax(
+                filing,
+                base,
+                sample_start,
+                sample_end,
+                pay_frequency="monthly",
+            )
+            explained = explain_period_tax(
+                filing,
+                base,
+                sample_start,
+                sample_end,
+                pay_frequency="monthly",
+            )
+            tax_scale = getattr(filing, "tax_scale", "annual") or "annual"
+            if tax_scale == "period":
+                calculation = str(
+                    _("On %(label)s %(base)s (period brackets)")
+                    % {
+                        "label": base_label,
+                        "base": f"{base:,.2f}",
+                    }
+                )
+            else:
+                calculation = str(
                     _("On %(label)s %(base)s → %(yearly)s a year")
                     % {
                         "label": base_label,
                         "base": f"{base:,.2f}",
-                        "yearly": f"{yearly_base:,.0f}",
+                        "yearly": f"{explained['yearly_income']:,.0f}",
                     }
-                ),
-                "amount": round(period_tax, 2),
+                )
+            tax_line = {
+                "code": "TAX",
+                "title": str(filing),
+                "calculation": calculation,
+                "amount": round(charged, 2),
                 "employer": None,
                 "note": None,
                 "base_key": filing.based_on,
                 "base_label": str(base_label),
                 "base_amount": round(base, 2),
+                "tax_scale": tax_scale,
+                "slabs": (explained.get("breakdown") or {}).get("slabs") or [],
             }
-            deductions_total += period_tax
-            income_tax = period_tax
+            if tax_scale == "period":
+                annual_filing = copy(filing)
+                annual_filing.tax_scale = "annual"
+                annualised = period_tax(
+                    annual_filing,
+                    base,
+                    sample_start,
+                    sample_end,
+                    pay_frequency="monthly",
+                )
+                tax_line["annualised_comparison"] = {
+                    "amount": round(annualised, 2),
+                    "note": str(
+                        _(
+                            "If this filing used annual withholding on the "
+                            "same period pay, tax would be %(amount)s. "
+                            "Payslip net uses the period-scale figure above."
+                        )
+                        % {"amount": f"{annualised:,.2f}"}
+                    ),
+                }
+            deductions_total += charged
+            income_tax = charged
         except TaxComputationError as exc:
             tax_line = {
                 "code": "TAX",
@@ -434,6 +480,7 @@ def build_salary_structure_preview(
                 "base_key": filing.based_on,
                 "base_label": str(base_label),
                 "base_amount": round(base, 2),
+                "tax_scale": getattr(filing, "tax_scale", "annual") or "annual",
             }
 
     # ---- the payslip heads, each with the equation behind it ----------------

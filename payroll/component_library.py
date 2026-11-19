@@ -299,6 +299,70 @@ COMPONENT_LIBRARY = [
             "is_pretax": True,
         },
     },
+    # --------------------------------------------------------------- Uganda
+    # The employee and employer shares are separate components so each shows
+    # as its own line, the way NSSF schedules and payslips present them. The
+    # titles match what people tend to name them by hand, so loading the pack
+    # next to existing ones finds them instead of adding a second NSSF.
+    {
+        "key": "ug_nssf_employee",
+        "group": _("Uganda"),
+        "kind": DEDUCTION,
+        "name": "Employee NSSF Contribution",
+        "summary": _("5% of gross pay, after tax."),
+        "note": _(
+            "NSSF is charged on gross pay including allowances, with no "
+            "ceiling. It does not reduce PAYE, so it comes off after tax."
+        ),
+        "fields": {
+            "sequence": 100,
+            "is_fixed": False,
+            "based_on": "gross_pay",
+            "rate": 5.0,
+            "employer_rate": 0.0,
+            "is_pretax": False,
+        },
+    },
+    {
+        "key": "ug_nssf_employer",
+        "group": _("Uganda"),
+        "kind": DEDUCTION,
+        "name": "Employer NSSF Contribution",
+        "summary": _("The employer's 10% of gross pay. Nothing comes off the employee."),
+        "note": _(
+            "Shown as a line so the employer's share appears on the payslip "
+            "and in the contributions report."
+        ),
+        "fields": {
+            "sequence": 101,
+            "is_fixed": False,
+            "based_on": "gross_pay",
+            "rate": 0.0,
+            "employer_rate": 10.0,
+            "is_pretax": False,
+        },
+    },
+    {
+        "key": "ug_lst",
+        "group": _("Uganda"),
+        "kind": DEDUCTION,
+        "name": "LST",
+        "summary": _(
+            "Local Service Tax by monthly income band, from nil up to "
+            "100,000 a year, taken in four instalments July to October."
+        ),
+        "note": _(
+            "Allowable for PAYE, so it comes off before tax. Mark exempt "
+            "staff (forces, police, prisons, diplomats), and anyone who "
+            "already paid this year's LST elsewhere, on their contract."
+        ),
+        "fields": {
+            "sequence": 102,
+            "is_fixed": False,
+            "based_on": "uganda_lst",
+            "is_pretax": True,
+        },
+    },
 ]
 
 

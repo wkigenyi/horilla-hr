@@ -46,7 +46,12 @@ from payroll.system_components import (
     policy,
     tax_field,
 )
-from payroll.tax_packs import load_tax_packs, pack_rows
+from payroll.tax_packs import (
+    TAX_PACKS,
+    load_tax_packs,
+    pack_rows,
+    packs_setting_currency,
+)
 from payroll.views.component_formula_views import (
     available_codes,
     limit_note_rows,
@@ -585,11 +590,48 @@ class SystemComponentView(APIView):
         return Response(_system_payload(entry), status=200)
 
 
+_TAX_SCALE_CHOICES = [
+    {
+        "value": "annual",
+        "label": "Annual",
+        "band_unit": "year",
+        "description": (
+            "Bands are yearly. Each payslip's pay is scaled to a year, taxed, "
+            "and one period's share is withheld."
+        ),
+    },
+    {
+        "value": "period",
+        "label": "Monthly",
+        "band_unit": "month",
+        "description": (
+            "Bands are monthly and each month's pay is taxed on its own, with "
+            "no annualisation (Uganda PAYE). Weekly and semi-monthly pay is "
+            "taxed at its monthly equivalent."
+        ),
+    },
+]
+
+
+def _tax_scale(filing):
+    return getattr(filing, "tax_scale", "annual") or "annual"
+
+
+def _band_unit(filing):
+    return "month" if _tax_scale(filing) == "period" else "year"
+
+
 def _filing_payload(filing):
     return {
         "id": filing.pk,
         "filing_status": filing.filing_status,
         "based_on": filing.based_on,
+        "tax_scale": _tax_scale(filing),
+        # What the bands' amounts mean, so Imara can label them and ask for the
+        # matching preview income: yearly bands for "annual", monthly for
+        # "period" (Uganda-style monthly PAYE).
+        "band_unit": _band_unit(filing),
+        "tax_scale_choices": _TAX_SCALE_CHOICES,
         "use_py": filing.use_py,
         "python_code": filing.python_code,
         "standard_deduction": filing.standard_deduction,
@@ -657,9 +699,22 @@ class FilingStatusView(APIView):
 
 
 def _save_filing(filing, data, created):
+    if "tax_scale" in data:
+        allowed = [choice["value"] for choice in _TAX_SCALE_CHOICES]
+        if data.get("tax_scale") not in allowed:
+            return Response(
+                {
+                    "tax_scale": [
+                        _("Choose one of: %(values)s.")
+                        % {"values": ", ".join(allowed)}
+                    ]
+                },
+                status=400,
+            )
     for field in (
         "filing_status",
         "based_on",
+        "tax_scale",
         "use_py",
         "description",
         "standard_deduction",
@@ -697,17 +752,28 @@ class FilingStatusPreviewView(APIView):
         filing = FilingStatus.objects.filter(pk=pk).first()
         if filing is None:
             return Response({"detail": _("Filing status not found.")}, status=404)
+        # ``income`` is in the bands' own unit (see band_unit): a month's pay
+        # for a monthly status, a year's for an annual one. ``yearly_income``
+        # is the older name and is still accepted.
+        unit = _band_unit(filing)
+        raw = request.data.get("income", request.data.get("yearly_income"))
         try:
-            yearly_income = float(request.data.get("yearly_income") or 0)
+            income = float(raw or 0)
         except (TypeError, ValueError):
-            return Response(
-                {"detail": _("Enter a number for the yearly income.")}, status=400
+            message = (
+                _("Enter a number for the monthly income.")
+                if unit == "month"
+                else _("Enter a number for the yearly income.")
             )
+            return Response({"detail": message}, status=400)
         try:
-            breakdown_data = preview_yearly_tax(filing, yearly_income)
+            breakdown_data = preview_yearly_tax(filing, income)
         except TaxComputationError as exc:
             return Response({"detail": str(exc)}, status=400)
-        return Response({"ok": True, **breakdown_data}, status=200)
+        return Response(
+            {"ok": True, "band_unit": unit, "income": income, **breakdown_data},
+            status=200,
+        )
 
 
 class TaxPackView(APIView):
@@ -724,7 +790,21 @@ class TaxPackView(APIView):
         blocked = require_perm(request, "payroll.add_filingstatus")
         if blocked:
             return blocked
-        created = load_tax_packs(request.data.get("keys"))
+        keys = request.data.get("keys")
+        if keys is not None and not isinstance(keys, list):
+            return Response({"keys": [_("Send a list of pack keys.")]}, status=400)
+        wanted = [
+            pack for pack in TAX_PACKS if keys is None or pack["key"] in keys
+        ]
+        if any(pack.get("components") for pack in wanted):
+            blocked = require_perm(request, "payroll.add_deduction")
+            if blocked:
+                return blocked
+        if packs_setting_currency(keys):
+            blocked = require_perm(request, "payroll.change_payrollsettings")
+            if blocked:
+                return blocked
+        created = load_tax_packs(keys, company=company_for(request))
         return Response({"created": created}, status=201)
 
 

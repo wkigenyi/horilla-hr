@@ -28,6 +28,7 @@ from payroll.methods.component_engine import (
 from payroll.methods.contract_periods import forced_contract
 from payroll.methods.deductions import update_compensation_deduction
 from payroll.methods.limits import compute_limit
+from payroll.methods.local_service_tax import calculate_based_on_uganda_lst
 from payroll.methods.proration import flat_amount
 from payroll.models import models
 from payroll.models.models import (
@@ -1094,7 +1095,13 @@ def calculate_based_on_gross_pay(*_args, **kwargs):
 
     component = kwargs["component"]
     day_dict = kwargs["day_dict"]
-    gross_pay = calculate_gross_pay(**kwargs)
+    if kwargs.get("employee") is None and "total_allowance" not in kwargs:
+        # A salary structure's worked example has no employee to read
+        # compensation heads from; it passes the gross it has built.
+        gross = kwargs.get("gross_pay") or 0
+        gross_pay = gross if isinstance(gross, dict) else {"gross_pay": gross}
+    else:
+        gross_pay = calculate_gross_pay(**kwargs)
     rate = component.rate
     amount = gross_pay["gross_pay"] * rate / 100
     amount = compute_limit(component, amount, day_dict)
@@ -1649,4 +1656,5 @@ calculation_mapping = {
     "component": calculate_based_on_component,
     "formula": calculate_based_on_formula,
     "balance": calculate_based_on_balance,
+    "uganda_lst": calculate_based_on_uganda_lst,
 }
