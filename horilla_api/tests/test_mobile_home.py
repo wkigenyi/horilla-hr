@@ -64,11 +64,31 @@ class MobileHomeTests(TestCase):
             "on_leave_today",
             "announcement",
             "unread_notifications",
+            "display",
         ):
             self.assertIn(key, response.data)
         # Embedded so the tab bar needs no extra call.
         self.assertIn("role", response.data["capabilities"])
         self.assertIn("features", response.data["capabilities"])
+
+    def test_display_defaults_to_horilla_formats(self):
+        display = self.client.get(HOME_URL).data["display"]
+        self.assertEqual(
+            display, {"date_format": "MMM. D, YYYY", "time_format": "hh:mm A"}
+        )
+
+    def test_display_follows_the_company_format(self):
+        self.company.date_format = "DD/MM/YYYY"
+        self.company.time_format = "HH:mm"
+        self.company.save()
+        display = self.client.get(HOME_URL).data["display"]
+        self.assertEqual(display, {"date_format": "DD/MM/YYYY", "time_format": "HH:mm"})
+
+    def test_display_ignores_an_unknown_format(self):
+        self.company.date_format = "nonsense"
+        self.company.save()
+        display = self.client.get(HOME_URL).data["display"]
+        self.assertEqual(display["date_format"], "MMM. D, YYYY")
 
     def test_clean_slate_is_not_clocked_in(self):
         punch = self.client.get(HOME_URL).data["punch"]

@@ -17,6 +17,7 @@ cheap.
 from datetime import date, datetime
 
 from django.apps import apps
+from django.conf import settings
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -24,6 +25,12 @@ from rest_framework.views import APIView
 from attendance.models import Attendance, AttendanceActivity
 from horilla_api.api_methods.base.announcements import announcements_for
 from horilla_api.api_methods.base.capabilities import build_capabilities
+from horilla_api.api_views.base.preferences import (
+    DATE_FORMAT_DEFAULT,
+    TIME_FORMAT_DEFAULT,
+    _display_company,
+    preference_company,
+)
 
 
 def _format_seconds(seconds):
@@ -236,6 +243,23 @@ def _pending_approvals(request):
     return {"total": sum(by_kind.values()), "by_kind": by_kind}
 
 
+def _display_block(user):
+    """The company's date and time format, for every signed-in user.
+
+    System preferences only return these to people who may view the company,
+    but every screen formats dates, so the client needs them for everyone.
+    Unknown values fall back to Horilla's defaults.
+    """
+    company = _display_company(preference_company(user))
+    date_format = getattr(company, "date_format", None)
+    time_format = getattr(company, "time_format", None)
+    if date_format not in settings.HORILLA_DATE_FORMATS:
+        date_format = DATE_FORMAT_DEFAULT
+    if time_format not in settings.HORILLA_TIME_FORMATS:
+        time_format = TIME_FORMAT_DEFAULT
+    return {"date_format": date_format, "time_format": time_format}
+
+
 class MobileHomeAPIView(APIView):
     """Everything the home screen draws, in one request."""
 
@@ -260,6 +284,7 @@ class MobileHomeAPIView(APIView):
                     "avatar": employee.get_avatar(),
                 },
                 "capabilities": build_capabilities(request.user),
+                "display": _display_block(request.user),
                 "punch": _punch_block(employee, activities),
                 "geofence": _geofence_block(employee),
                 "today": {
