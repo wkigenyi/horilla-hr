@@ -25,6 +25,10 @@ services:
       - DATABASE_URL=postgres://horilla_user:horilla_pass@db:5432/horilla_db
       - DB_INIT_PASSWORD=dev-init-password-change-in-production
       - REDIS_URL=redis://:horilla_pass@redis:6379/0
+      # Django's zone and the container clock must agree: the attendance API
+      # stamps clock-ins with datetime.now(), the web app with Django's zone.
+      - TIME_ZONE=Africa/Kampala
+      - TZ=Africa/Kampala
     depends_on:
       db:
         condition: service_healthy
@@ -59,6 +63,10 @@ services:
       - DATABASE_URL=postgres://horilla_user:horilla_pass@db:5432/horilla_db
       - DB_INIT_PASSWORD=dev-init-password-change-in-production
       - REDIS_URL=redis://:horilla_pass@redis:6379/0
+      # Django's zone and the container clock must agree: the attendance API
+      # stamps clock-ins with datetime.now(), the web app with Django's zone.
+      - TIME_ZONE=Africa/Kampala
+      - TZ=Africa/Kampala
       # web owns migrate/collectstatic; racing them from here can deadlock on
       # DDL and would wipe STATIC_ROOT while web is serving from it.
       - HORILLA_SKIP_RELEASE_TASKS=1
