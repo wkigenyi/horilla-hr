@@ -18,6 +18,10 @@ from horilla_api.api_views.payroll.accounting import (
     AccountingGLMappingView,
     AccountingSummaryView,
 )
+from horilla_api.api_views.payroll.statutory import (
+    UgandaScheduleExportView,
+    UgandaScheduleView,
+)
 from horilla_api.api_views.payroll.configure import (
     ComponentCodeView,
     ComponentFormulaPreviewView,
@@ -267,6 +271,16 @@ urlpatterns = [
         "accounting/export/",
         AccountingExportView.as_view(),
         name="api-payroll-accounting-export",
+    ),
+    path(
+        "statutory/uganda/",
+        UgandaScheduleView.as_view(),
+        name="api-payroll-statutory-uganda",
+    ),
+    path(
+        "statutory/uganda/export/",
+        UgandaScheduleExportView.as_view(),
+        name="api-payroll-statutory-uganda-export",
     ),
     path("contribution/", ContributionView.as_view(), name="api-contribution"),
     path(
