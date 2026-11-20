@@ -44,6 +44,8 @@ urlpatterns = [
     path("notifications/", include("horilla_api.api_urls.notifications.urls")),
     path("payroll/", include("horilla_api.api_urls.payroll.urls")),
     path("attendance/", include("horilla_api.api_urls.attendance.urls")),
+    # Biometric machines (ZKTeco / eSSL and the other types the app supports).
+    path("biometric/", include("horilla_api.api_urls.biometric.urls")),
     path("leave/", include("horilla_api.api_urls.leave.urls")),
     path("helpdesk/", include("horilla_api.api_urls.helpdesk.urls")),
     path("ohs/", include("horilla_api.api_urls.ohs.urls")),
