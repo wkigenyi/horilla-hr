@@ -50,6 +50,16 @@ DEFAULT_TRACKED_MODELS = [
     ("payroll", "Deduction"),
     ("payroll", "LoanAccount"),
     ("payroll", "Reimbursement"),
+    # A run moving through draft, review, approved and paid is the approval
+    # trail an auditor asks for first. Only the fields a person changes are
+    # tracked (see DEFAULT_TRACKED_FIELDS); the counters are rewritten many
+    # times while a run generates.
+    ("payroll", "PayrollBatch"),
+    ("payroll", "PayAdjustment"),
+    # Tax setup: a bracket or filing status edit changes every payslip after it.
+    ("payroll", "FilingStatus"),
+    ("payroll", "TaxBracket"),
+    ("payroll", "PayrollGLMapping"),
     # Leave. Balance changes and approvals are the common dispute.
     ("leave", "LeaveRequest"),
     ("leave", "AvailableLeave"),
@@ -64,6 +74,23 @@ DEFAULT_TRACKED_MODELS = [
     ("attendance", "AttendanceDailyHours"),
 ]
 
+# Defaults that track only some fields. A model missing here tracks every field.
+DEFAULT_TRACKED_FIELDS = {
+    ("payroll", "PayrollBatch"): [
+        "batch_name",
+        "period_start",
+        "period_end",
+        "pay_date",
+        "status",
+    ],
+}
+
+# Defaults that keep no full snapshot (LogEntry.serialized_data). TaxBracket
+# stores an open top band as float("inf"), which is not valid JSON, so the
+# snapshot made every save of such a bracket fail. The field changes are
+# still logged.
+DEFAULT_NO_SNAPSHOT = {("payroll", "TaxBracket")}
+
 # Models registered by this module so we can safely unregister them later
 # without touching registrations made elsewhere.
 _managed_registrations: set = set()
@@ -77,9 +104,9 @@ def _resolve_model(app_label, model_name):
         return None
 
 
-def _register(model, fields):
+def _register(model, fields, snapshot=True):
     """Register ``model`` with auditlog using optional include_fields."""
-    kwargs = {"serialize_data": True}
+    kwargs = {"serialize_data": snapshot}
     if fields:
         kwargs["include_fields"] = list(fields)
     try:
@@ -126,7 +153,8 @@ def _load_targets():
     for app_label, model_name in DEFAULT_TRACKED_MODELS:
         model = _resolve_model(app_label, model_name)
         if model:
-            targets.append((model, []))
+            fields = DEFAULT_TRACKED_FIELDS.get((app_label, model_name), [])
+            targets.append((model, fields))
     return targets
 
 
@@ -144,7 +172,8 @@ def apply_audit_configuration():
             _unregister(model)
 
     for model, fields in desired:
-        _register(model, fields)
+        key = (model._meta.app_label, model.__name__)
+        _register(model, fields, snapshot=key not in DEFAULT_NO_SNAPSHOT)
 
 
 def on_config_change(sender, instance=None, **kwargs):

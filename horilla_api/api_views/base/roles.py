@@ -138,7 +138,39 @@ def permission_catalog():
             apps_out.append(
                 {"app": _permission_app_label(app_name), "models": models_out}
             )
+    audit = _audit_trail_catalog_entry()
+    if audit:
+        apps_out.append(audit)
     return apps_out
+
+
+def _audit_trail_catalog_entry():
+    """The audit trail's one grantable permission.
+
+    The trail is read from django-auditlog's LogEntry, which is not one of
+    settings.APPS, so the loop above never offers it. An auditor or finance
+    lead needs it without being made a superuser.
+    """
+    if not Permission.objects.filter(
+        content_type__app_label="auditlog", codename="view_logentry"
+    ).exists():
+        return None
+    return {
+        "app": "Audit trail",
+        "models": [
+            {
+                "name": "Audit trail",
+                "actions": [
+                    {
+                        "id": "auditlog.view_logentry",
+                        "action": "view",
+                        "label": ACTION_LABELS["view"],
+                    }
+                ],
+                "custom": [],
+            }
+        ],
+    }
 
 
 def _assigned_ids(queryset):

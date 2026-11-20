@@ -132,6 +132,28 @@ def apply_company_header(user, request):
     set_selected_company(company_id)
 
 
+def attach_audit_actor(user):
+    """Name ``user`` as the actor on audit log entries for this request.
+
+    ``AuditlogMiddleware`` reads ``request.user`` once, while the middleware
+    runs, and a tokened request is still anonymous at that point. Without this
+    every change made through the API was logged with no actor, so the audit
+    trail could say a wage changed but not who changed it. The middleware's
+    context is a plain dict held for the whole request, so filling in the
+    actor here reaches every entry the view writes.
+    """
+    try:
+        from auditlog.context import auditlog_value
+
+        context = auditlog_value.get()
+    except (ImportError, LookupError):
+        # Outside the middleware (management commands, tests calling the
+        # view directly): nothing to attach to.
+        return
+    if isinstance(context, dict) and context.get("actor") is None:
+        context["actor"] = user
+
+
 class TenantScopedJWTAuthentication(JWTAuthentication):
     """JWTAuthentication that also establishes tenant scope.
 
@@ -153,6 +175,7 @@ class TenantScopedJWTAuthentication(JWTAuthentication):
             return None
 
         user, validated_token = result
+        attach_audit_actor(user)
         company_id = resolve_company_id(user)
         if company_id is not None:
             set_selected_company(company_id)

@@ -57,6 +57,8 @@ _PERMISSIONS = (
     ("view_employee", "employee.view_employee"),
     ("edit_employee", "employee.change_employee"),
     ("view_payslip", "payroll.view_payslip"),
+    # The audit trail screen (who changed what and when).
+    ("view_audit_trail", "auditlog.view_logentry"),
     ("change_payslip", "payroll.change_payslip"),
     ("add_payslip", "payroll.add_payslip"),
     ("delete_payslip", "payroll.delete_payslip"),
