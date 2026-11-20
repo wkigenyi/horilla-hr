@@ -36,6 +36,7 @@ from horilla.__version__ import __version__
 OPTIONAL_APPS = (
     "asset",
     "attendance",
+    "biometric",
     "facedetection",
     "geofencing",
     "helpdesk",
@@ -147,6 +148,14 @@ _PERMISSIONS = (
     ("view_attendanceovertime", "attendance.view_attendanceovertime"),
     ("change_attendanceovertime", "attendance.change_attendanceovertime"),
     ("view_attendancelatecomeearlyout", "attendance.view_attendancelatecomeearlyout"),
+    # Biometric machines
+    ("view_biometricdevices", "biometric.view_biometricdevices"),
+    ("add_biometricdevices", "biometric.add_biometricdevices"),
+    ("change_biometricdevices", "biometric.change_biometricdevices"),
+    ("delete_biometricdevices", "biometric.delete_biometricdevices"),
+    ("view_biometricemployees", "biometric.view_biometricemployees"),
+    ("add_biometricemployees", "biometric.add_biometricemployees"),
+    ("delete_biometricemployees", "biometric.delete_biometricemployees"),
     # Recruitment
     ("view_recruitment", "recruitment.view_recruitment"),
     ("add_recruitment", "recruitment.add_recruitment"),
