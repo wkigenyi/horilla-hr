@@ -98,6 +98,15 @@ _NOT_MONEY_HINTS = (
     "month",
 )
 
+# Fields a scheduled job recalculates on its own. A system update that changed
+# only these says nothing an auditor asks about, and there are thousands of
+# them: the experience job saves every work record every four hours. They are
+# hidden with ``routine=hide``; an update by a person, or one that also changed
+# a real field, always shows.
+ROUTINE_FIELDS = {
+    "employee.employeeworkinformation": {"experience"},
+}
+
 MAX_PAGE_SIZE = 100
 
 
@@ -361,6 +370,31 @@ def _company_scope(user, queryset):
     return queryset.filter(visible)
 
 
+def _routine_updates():
+    """System updates whose only meaningful change is a ROUTINE_FIELDS field."""
+    routine = Q(pk__in=[])
+    for model_key, fields in ROUTINE_FIELDS.items():
+        content_type = _content_type_from_key(model_key)
+        model = content_type.model_class() if content_type else None
+        if model is None:
+            continue
+        # Changes are keyed by field name; foreign keys may use the column name.
+        other_fields = set()
+        for field in model._meta.concrete_fields:
+            other_fields.update({field.name, field.attname})
+        other_fields -= fields | HIDDEN_FIELDS
+        routine |= (
+            Q(
+                content_type=content_type,
+                action=LogEntry.Action.UPDATE,
+                actor__isnull=True,
+                changes__has_any_keys=sorted(fields),
+            )
+            & ~Q(changes__has_any_keys=sorted(other_fields))
+        )
+    return routine
+
+
 def _parse_day(raw, end=False):
     day = parse_date(raw) if raw else None
     if day is None:
@@ -380,6 +414,7 @@ class AuditEntryListView(APIView):
       actor      user id
       action     create | update | delete
       field      only entries that changed this field, e.g. ``wage``
+      routine    ``hide`` leaves out system recalculations (ROUTINE_FIELDS)
       date_from, date_to   YYYY-MM-DD, inclusive
       search     record name or the person's email
       page, page_size (max 100)
@@ -444,6 +479,8 @@ class AuditEntryListView(APIView):
             queryset = queryset.filter(action=action)
         if params.get("field"):
             queryset = queryset.filter(changes__has_key=params["field"])
+        if (params.get("routine") or "").lower() == "hide":
+            queryset = queryset.exclude(_routine_updates())
         start = _parse_day(params.get("date_from"))
         if start:
             queryset = queryset.filter(timestamp__gte=start)

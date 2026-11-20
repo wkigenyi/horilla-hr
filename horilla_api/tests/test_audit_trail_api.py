@@ -185,6 +185,40 @@ class AuditTrailApiTests(TestCase):
         )
         self.assertIn(self.admin.pk, [p["id"] for p in filters.data["people"]])
 
+    def test_routine_recalculations_can_be_left_out(self):
+        work = self.admin_employee.employee_work_info
+        content_type = ContentType.objects.get_for_model(work)
+
+        def logged(changes, actor=None):
+            return LogEntry.objects.create(
+                content_type=content_type,
+                object_pk=str(work.pk),
+                object_id=work.pk,
+                object_repr=str(work),
+                action=LogEntry.Action.UPDATE,
+                changes=changes,
+                actor=actor,
+            ).pk
+
+        # The experience job: a system save that only moved experience.
+        job = logged({"experience": ["4.249", "4.252"], "modified_at": ["a", "b"]})
+        # A system save that also changed a real field still matters.
+        mixed = logged({"experience": ["4.2", "4.3"], "shift_id": ["1", "2"]})
+        # So does a person touching experience by hand.
+        person = logged({"experience": ["1.0", "2.0"]}, actor=self.admin)
+
+        query = {"model": "employee.employeeworkinformation", "object_id": work.pk}
+        everything = self.client.get(ENTRIES, query)
+        self.assertEqual(everything.status_code, 200, everything.data)
+        shown = {entry["id"] for entry in everything.data["results"]}
+        self.assertTrue({job, mixed, person} <= shown)
+
+        hidden = self.client.get(ENTRIES, {**query, "routine": "hide"})
+        self.assertEqual(hidden.status_code, 200, hidden.data)
+        shown = {entry["id"] for entry in hidden.data["results"]}
+        self.assertNotIn(job, shown)
+        self.assertTrue({mixed, person} <= shown)
+
     # -- who may see it --------------------------------------------------
 
     def test_the_trail_needs_the_audit_permission(self):
