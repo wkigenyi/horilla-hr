@@ -298,6 +298,20 @@ def review(employees, start_date, end_date):
     }
 
 
+def overlapping_batches(start_date, end_date):
+    """
+    The selected company's runs that share any day with the given dates.
+
+    Any shared day counts, not only identical dates: a run moved by a day would
+    otherwise pass, and the people in both would be left out of the second one.
+    """
+    from payroll.models.models import PayrollBatch
+
+    return PayrollBatch.objects.filter(
+        period_start__lte=end_date, period_end__gte=start_date
+    ).order_by("period_start", "pk")
+
+
 @transaction.atomic
 def create_batch(*, name, start_date, end_date, employees, user=None, settings=None):
     """

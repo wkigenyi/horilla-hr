@@ -319,6 +319,27 @@ class PayrollBatchView(APIView):
         if errors:
             return Response(errors, status=400)
 
+        # One run per stretch of days. Review only leaves out the people who
+        # already have a payslip; a second run for the same dates is refused
+        # outright, until the first is reopened or deleted.
+        taken = batch_run.overlapping_batches(start, end).first()
+        if taken is not None:
+            return Response(
+                {
+                    "detail": _(
+                        "%(name)s already covers %(start)s to %(end)s. Reopen or "
+                        "delete that run before running these dates again."
+                    )
+                    % {
+                        "name": taken.batch_name,
+                        "start": taken.period_start,
+                        "end": taken.period_end,
+                    },
+                    "overlapping_batch_id": taken.pk,
+                },
+                status=400,
+            )
+
         employees = list(Employee.objects.filter(pk__in=employee_ids))
         reviewed = batch_run.review(employees, start, end)
         ready = [row["employee"] for row in reviewed["rows"] if not row["blocked"]]

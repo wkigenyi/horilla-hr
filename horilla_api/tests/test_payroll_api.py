@@ -138,6 +138,42 @@ class PayrollApiTests(TestCase):
         )
         self.assertEqual(backward.status_code, 400, backward.data)
 
+    def test_batch_is_refused_for_dates_another_run_covers(self):
+        self._contract()
+        body = {
+            "batch_name": "January",
+            "period_start": "2026-01-01",
+            "period_end": "2026-01-31",
+            "employee_ids": [self.employee.pk],
+        }
+        created = self.client.post("/api/v1/payroll/batches/", body, format="json")
+        self.assertEqual(created.status_code, 201, created.data)
+
+        # The same dates again, and dates that only share some days.
+        for start, end in (("2026-01-01", "2026-01-31"), ("2026-01-21", "2026-02-20")):
+            refused = self.client.post(
+                "/api/v1/payroll/batches/",
+                {**body, "batch_name": "Again", "period_start": start, "period_end": end},
+                format="json",
+            )
+            self.assertEqual(refused.status_code, 400, refused.data)
+            self.assertIn("January", refused.data["detail"])
+            self.assertEqual(refused.data["overlapping_batch_id"], created.data["id"])
+        self.assertEqual(PayrollBatch.objects.count(), 1)
+
+        # The day after the first run ends is free.
+        following = self.client.post(
+            "/api/v1/payroll/batches/",
+            {
+                **body,
+                "batch_name": "February",
+                "period_start": "2026-02-01",
+                "period_end": "2026-02-28",
+            },
+            format="json",
+        )
+        self.assertEqual(following.status_code, 201, following.data)
+
     def test_generate_records_a_failed_line_and_finishes(self):
         self._contract()
         created = self.client.post(
