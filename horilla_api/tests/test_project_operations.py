@@ -209,7 +209,7 @@ class ProjectOperationTests(TestCase):
         self.assertEqual(hidden.status_code, 404)
         self.assertNotIn("Logged", hidden.content.decode())
 
-    def test_stage_reorder_and_expired_task_stays_put(self):
+    def test_stage_reorder_and_past_due_task_still_moves(self):
         user, employee = self._user("ops_board", "change_projectstage", "change_task")
         self._auth(user)
         project = self._project("Board site")
@@ -228,21 +228,95 @@ class ProjectOperationTests(TestCase):
         self.assertEqual(second.sequence, 1)
         self.assertEqual(first.sequence, 2)
 
-        expired = Task.objects.create(
-            title="Too late",
+        past_due = Task.objects.create(
+            title="Entered late",
             project=project,
             stage=first,
             description="Past",
             end_date=self.today - timedelta(days=1),
         )
-        blocked = self.client.post(
+        dragged = self.client.post(
             f"/api/v1/project/project/{project.id}/task/reorder/",
-            {"stage_id": second.id, "sequence": {str(expired.id): 1}},
+            {"stage_id": second.id, "sequence": {str(past_due.id): 1}},
             format="json",
         )
-        self.assertEqual(blocked.status_code, 400)
-        expired.refresh_from_db()
-        self.assertEqual(expired.stage_id, first.id)
+        self.assertEqual(dragged.status_code, 200, dragged.content)
+        past_due.refresh_from_db()
+        self.assertEqual(past_due.stage_id, second.id)
+
+    def test_backdated_task_is_never_expired_automatically(self):
+        user, employee = self._user(
+            "ops_late", "add_task", "change_task", "view_task"
+        )
+        self._auth(user)
+        project = self._project(
+            "Late site", start_date=self.today - timedelta(days=60)
+        )
+        stage = ProjectStage.objects.filter(project=project).first()
+        ended = self.today - timedelta(days=30)
+        created = self.client.post(
+            "/api/v1/project/task/",
+            {
+                "title": "Entered after the fact",
+                "description": "Backdated",
+                "project_id": project.id,
+                "stage_id": stage.id,
+                "start_date": (ended - timedelta(days=2)).isoformat(),
+                "end_date": ended.isoformat(),
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201, created.content)
+        self.assertEqual(created.data["status"], "to_do")
+        url = f"/api/v1/project/task/{created.data['id']}/"
+
+        # Saving a past-due task leaves its status alone.
+        renamed = self.client.put(url, {"title": "Still open"}, format="json")
+        self.assertEqual(renamed.status_code, 200, renamed.content)
+        self.assertEqual(renamed.data["status"], "to_do")
+
+        # The completion date is the one entered, not the day it was keyed in.
+        done = self.client.put(
+            url,
+            {"status": "completed", "completed_at": ended.isoformat()},
+            format="json",
+        )
+        self.assertEqual(done.status_code, 200, done.content)
+        task = Task.objects.get(pk=created.data["id"])
+        self.assertEqual(task.status, "completed")
+        self.assertEqual(task.completed_at, ended)
+
+        # A later save without the date keeps it.
+        again = self.client.put(url, {"title": "Closed out"}, format="json")
+        self.assertEqual(again.status_code, 200, again.content)
+        task.refresh_from_db()
+        self.assertEqual(task.completed_at, ended)
+
+    def test_expired_task_can_be_completed_and_defaults_to_today(self):
+        user, employee = self._user("ops_expired", "change_task", "view_task")
+        self._auth(user)
+        project = self._project("Expired site")
+        stage = ProjectStage.objects.filter(project=project).first()
+        task = Task.objects.create(
+            title="Marked expired",
+            project=project,
+            stage=stage,
+            description="Past",
+            status="expired",
+            end_date=self.today - timedelta(days=1),
+        )
+        url = f"/api/v1/project/task/{task.id}/"
+        done = self.client.put(url, {"status": "completed"}, format="json")
+        self.assertEqual(done.status_code, 200, done.content)
+        task.refresh_from_db()
+        self.assertEqual(task.status, "completed")
+        self.assertEqual(task.completed_at, self.today)
+
+        reopened = self.client.put(url, {"status": "in_progress"}, format="json")
+        self.assertEqual(reopened.status_code, 200, reopened.content)
+        task.refresh_from_db()
+        self.assertEqual(task.status, "in_progress")
+        self.assertIsNone(task.completed_at)
 
     def test_bulk_archive_skips_a_project_the_user_cannot_change(self):
         user, employee = self._user("ops_bulk")

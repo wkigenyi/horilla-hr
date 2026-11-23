@@ -5,7 +5,6 @@ and apply the same permission each screen already uses.
 """
 
 import logging
-from datetime import date
 from io import BytesIO
 
 import numpy as np
@@ -248,15 +247,9 @@ class TaskReorderAPIView(APIView):
                 {"error": _("Every task must belong to this project.")},
                 status=400,
             )
-        today = date.today()
         for task in tasks.values():
             if not can_change_task(request.user, task):
                 return _denied()
-            if task.end_date and task.end_date < today:
-                return Response(
-                    {"error": _("Cannot update status. Task has already expired.")},
-                    status=400,
-                )
         changed = False
         for task in tasks.values():
             if task.stage_id != stage.id:

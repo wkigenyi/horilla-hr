@@ -1004,10 +1004,6 @@ def task_stage_change(request, task_id):
         messages.error(request, _("Stage not found"))
         return HttpResponse("<script>$('#reloadMessagesButton').click();</script>")
 
-    if task.end_date and task.end_date < datetime.date.today():
-        messages.warning(request, _("Cannot update stage. Task has already expired."))
-        return HttpResponse("<script>$('#reloadMessagesButton').click();</script>")
-
     project = task.project
     if not (
         request.user.has_perm("project.change_task")
@@ -1116,10 +1112,6 @@ def drag_and_drop_task(request):
         messages.error(request, _("Task not found"))
         return JsonResponse({"error": "Task not found"}, status=404)
 
-    if task.end_date and task.end_date < date.today():
-        messages.warning(request, _("Cannot update status. Task has already expired."))
-        return JsonResponse({"change": True})
-
     project = task.project
     if (
         request.user.has_perm("project.change_task")
@@ -1205,10 +1197,6 @@ def update_project_task_status(request, task_id):
     task = Task.find(task_id)
     if not task:
         return HorillaRedirect(request, message=_("Task not found"))
-
-    if task.end_date and task.end_date < date.today():
-        messages.warning(request, _("Cannot update status. Task has already expired."))
-        return HttpResponse("<script>$('#reloadMessagesButton').click();</script>")
 
     task.status = status
     task.save()

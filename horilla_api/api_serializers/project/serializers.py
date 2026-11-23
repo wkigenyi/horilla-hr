@@ -2,7 +2,7 @@
 horilla_api/api_serializers/project/serializers.py
 """
 
-from datetime import date, datetime
+from datetime import datetime
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import models as dj_models
@@ -183,6 +183,10 @@ class TaskSerializer(serializers.ModelSerializer):
         required=False,
     )
     pay_allocations = serializers.SerializerMethodField()
+    # Writable so a backdated completion lands in the pay period the work
+    # was actually done in. The model field is editable=False for the
+    # classic forms, so it has to be declared here.
+    completed_at = serializers.DateField(required=False, allow_null=True)
     allocated_seconds = serializers.IntegerField(read_only=True)
     timesheet_spent_seconds = serializers.IntegerField(read_only=True)
 
@@ -192,7 +196,6 @@ class TaskSerializer(serializers.ModelSerializer):
         extra_kwargs = {
             "task_managers": {"read_only": True},
             "task_members": {"read_only": True},
-            "completed_at": {"read_only": True},
             "payroll_adjustment": {"read_only": True},
         }
 
@@ -259,22 +262,25 @@ class TaskSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"stage_id": [_("Stage does not belong to this project.")]}
             )
-        if self.instance is not None and self.instance.end_date:
-            if self.instance.end_date < date.today():
-                status = attrs.get("status", self.instance.status)
-                next_stage = attrs.get("stage", self.instance.stage)
-                stage_changed = (
-                    next_stage is not None
-                    and next_stage.id != self.instance.stage_id
-                )
-                if status != self.instance.status or stage_changed:
-                    raise serializers.ValidationError(
-                        {
-                            "status": [
-                                _("Cannot update status. Task has already expired.")
-                            ]
-                        }
-                    )
+        # A blank completion date means "leave it to the model": today when
+        # the task first completes, otherwise whatever is already recorded.
+        if attrs.get("completed_at", serializers.empty) is None:
+            attrs.pop("completed_at")
+        if (
+            "completed_at" in attrs
+            and self.instance is not None
+            and self.instance.payroll_adjustment_id
+            and attrs["completed_at"] != self.instance.completed_at
+        ):
+            raise serializers.ValidationError(
+                {
+                    "completed_at": [
+                        _(
+                            "This task is already included in payroll, so its completion date cannot change."
+                        )
+                    ]
+                }
+            )
 
         members = attrs.get("task_members", serializers.empty)
         if members is serializers.empty:

@@ -406,7 +406,11 @@ class Task(HorillaModel):
     objects = HorillaCompanyManager("project__company_id")
 
     def sync_completed_at(self):
-        """Stamp or clear completed_at from the current status."""
+        """Stamp or clear completed_at from the current status.
+
+        A date already on the task is kept, so a backdated completion
+        entered by hand is not overwritten with today.
+        """
         if self.status == "completed":
             if self.completed_at is None:
                 self.completed_at = date.today()
@@ -434,8 +438,9 @@ class Task(HorillaModel):
                         )
                     }
                 )
-        if self.end_date is not None and self.end_date < date.today():
-            self.status = "expired"
+        # Status is never derived from the end date: tasks are entered
+        # backdated, so a past end date says nothing about the work itself.
+        # "Expired" is a status someone chooses.
 
     class Meta:
         """
@@ -461,9 +466,8 @@ class Task(HorillaModel):
     def is_overdue(self):
         """
         Past its end date and not completed -- checked against the date
-        directly rather than trusting self.status == "expired", since that
-        transition only happens when clean() runs (i.e. on an explicit
-        form save), not passively as time passes.
+        directly, since "expired" is a status someone chooses and is never
+        set automatically.
         """
         return bool(
             self.end_date

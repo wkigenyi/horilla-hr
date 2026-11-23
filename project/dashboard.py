@@ -94,9 +94,8 @@ def project_task_kpi_data(request):
     period picker, which scopes historical charts, not "what needs attention
     right now".
 
-    Tasks already marked "expired" (Task.clean() sets this once end_date has
-    passed, but only on an explicit save, not passively as time ticks by) are
-    left out of all three buckets here, matching task-all's own is_open=true
+    Tasks marked "expired" (a status someone chooses; it is never set
+    automatically from end_date) are left out of all three buckets here, matching task-all's own is_open=true
     filter -- the same one this view's own task-all links use -- so a tile's
     count always matches what clicking into it shows.
     """
