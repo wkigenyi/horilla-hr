@@ -291,6 +291,13 @@ class PayrollBatchScopeForm(HorillaForm):
                 self.add_error(
                     "period_start", _("A period that has not begun cannot be paid.")
                 )
+            else:
+                # One run per stretch of days: refused here, before review.
+                from payroll.methods import batch_run
+
+                refusal = batch_run.overlap_refusal(start, cleaned["period_end"])
+                if refusal:
+                    self.add_error("period_start", refusal[1])
 
         if cleaned.get("scope") == self.SCOPE_SELECTED and not cleaned["employee_id"]:
             self.add_error("employee_id", _("Choose at least one employee."))

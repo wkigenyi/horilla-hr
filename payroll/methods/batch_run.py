@@ -312,6 +312,27 @@ def overlapping_batches(start_date, end_date):
     ).order_by("period_start", "pk")
 
 
+def overlap_refusal(start_date, end_date):
+    """
+    Why a run for these dates is refused, or ``None`` when the dates are free.
+
+    Returns ``(batch, message)`` for the first run in the way. One wording for
+    the API and the wizard, so both say the same thing about the same run.
+    """
+    taken = overlapping_batches(start_date, end_date).first()
+    if taken is None:
+        return None
+    message = _(
+        "%(name)s already covers %(start)s to %(end)s. Reopen or "
+        "delete that run before running these dates again."
+    ) % {
+        "name": taken.batch_name,
+        "start": taken.period_start,
+        "end": taken.period_end,
+    }
+    return taken, str(message)
+
+
 @transaction.atomic
 def create_batch(*, name, start_date, end_date, employees, user=None, settings=None):
     """

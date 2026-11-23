@@ -420,6 +420,24 @@ class ScopeTests(Fixture):
         self.assertEqual(response.status_code, 200)
         self.assertNotIn(SESSION_KEY, self.client.session)
 
+    def test_dates_another_run_covers_are_refused(self):
+        batch_run.create_batch(
+            name="April", start_date=START, end_date=END, employees=self.people
+        )
+        # The same period, and one that only shares its last days.
+        for start in (START, START + timedelta(days=20)):
+            response = self.client.post(
+                reverse("payroll-batch-scope"),
+                {
+                    "batch_name": "Again",
+                    "period_start": start.isoformat(),
+                    "scope": "all",
+                },
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertNotIn(SESSION_KEY, self.client.session)
+            self.assertContains(response, "April already covers")
+
     def test_review_without_a_scope_returns_to_the_start(self):
         response = self.client.get(reverse("payroll-batch-review"))
         self.assertRedirects(response, reverse("payroll-batch-scope"))
@@ -506,6 +524,16 @@ class StartTests(Fixture):
         response = self.start(self.summaries(everyone))
         self.assertEqual(PayrollBatch.objects.count(), 0)
         self.assertRedirects(response, reverse("payroll-batch-review"))
+
+    def test_a_run_started_meanwhile_for_the_same_dates_stops_this_one(self):
+        batch_run.create_batch(
+            name="April", start_date=START, end_date=END, employees=self.people
+        )
+        response = self.start(self.summaries())
+        self.assertEqual(PayrollBatch.objects.count(), 1)
+        self.assertRedirects(
+            response, reverse("payroll-batch-scope"), fetch_redirect_response=False
+        )
 
     def test_the_scope_is_cleared_so_it_cannot_be_run_twice(self):
         self.start(self.summaries())

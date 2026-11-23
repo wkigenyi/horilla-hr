@@ -473,6 +473,15 @@ def wizard_start(request):
     end = date.fromisoformat(state["period_end"])
     employees = list(Employee.objects.filter(pk__in=state["employee_ids"]))
 
+    # Checked again here: another run may have been started for these dates
+    # since the scope step, and a reopened scope never went through the form.
+    refusal = batch_run.overlap_refusal(start, end)
+    if refusal:
+        messages.error(request, refusal[1])
+        if request.headers.get("HX-Request"):
+            return HorillaRedirect(request, reverse("payroll-batch-scope"))
+        return redirect("payroll-batch-scope")
+
     result = batch_run.review(employees, start, end)
     ready = [row["employee"] for row in result["rows"] if not row["blocked"]]
 
