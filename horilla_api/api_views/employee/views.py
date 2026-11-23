@@ -37,6 +37,7 @@ from horilla_documents.models import Document, DocumentRequest
 from notifications.signals import notify
 
 from ...api_decorators.base.decorators import (
+    ManagerPermission,
     approver_permission_required,
     manager_or_owner_permission_required,
     manager_permission_required,
@@ -443,6 +444,36 @@ class EmployeeBankDetailsAPIView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class EmployeeBankDetailsCreateAPIView(EmployeeBankDetailsAPIView):
+    """
+    ``POST employee-bank-details/`` with no id, for a first bank record.
+
+    Only the id route existed, so nobody could create one through the API.
+    Create-only on purpose: the parent's other methods need a pk.
+    """
+
+    http_method_names = ["post", "options"]
+
+
+def _manages_employees(user):
+    """
+    Whether the caller may add or change employees.
+
+    That covers the work information too: it is one of the steps of adding
+    or editing an employee, so it does not need a second permission.
+    """
+    return user.has_perm("employee.add_employee") or user.has_perm(
+        "employee.change_employee"
+    )
+
+
+def _work_info_denied():
+    return Response(
+        {"error": _("You do not have permission to perform this action.")},
+        status=status.HTTP_403_FORBIDDEN,
+    )
+
+
 class EmployeeWorkInformationAPIView(APIView):
     """
     Manage employee work information with CRUD operations.
@@ -471,7 +502,10 @@ class EmployeeWorkInformationAPIView(APIView):
             if (
                 request.user.employee_get
                 in [work_info.employee_id, work_info.reporting_manager_id]
-            ) or request.user.has_perm("employee.view_employeeworkinformation"):
+            ) or (
+                request.user.has_perm("employee.view_employeeworkinformation")
+                or _manages_employees(request.user)
+            ):
                 serializer = EmployeeWorkInformationSerializer(work_info)
                 return Response(serializer.data, status=200)
             return Response({"message": _("No permission")}, status=400)
@@ -486,20 +520,33 @@ class EmployeeWorkInformationAPIView(APIView):
         serializer = EmployeeWorkInformationSerializer(page, many=True)
         return paginator.get_paginated_response(serializer.data)
 
-    @manager_permission_required("employee.add_employeeworkinformation")
     def post(self, request):
+        if not (
+            _manages_employees(request.user)
+            or ManagerPermission().has_permission(
+                request, "employee.add_employeeworkinformation"
+            )
+        ):
+            return _work_info_denied()
         serializer = EmployeeWorkInformationSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    @manager_permission_required("employee.change_employeeworkinformation")
     def put(self, request, pk):
+        if not (
+            _manages_employees(request.user)
+            or ManagerPermission().has_permission(
+                request, "employee.change_employeeworkinformation"
+            )
+        ):
+            return _work_info_denied()
         work_info = EmployeeWorkInformation.objects.get(pk=pk)
         if (
             request.user.employee_get == work_info.reporting_manager_id
             or request.user.has_perm("employee.change_employeeworkinformation")
+            or _manages_employees(request.user)
         ):
             serializer = EmployeeWorkInformationSerializer(
                 work_info, data=request.data, partial=True

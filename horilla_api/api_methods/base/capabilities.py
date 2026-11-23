@@ -57,6 +57,7 @@ _PERMISSIONS = (
     ("approve_shift_request", "base.change_shiftrequest"),
     ("view_employee", "employee.view_employee"),
     ("edit_employee", "employee.change_employee"),
+    ("add_employee", "employee.add_employee"),
     ("view_payslip", "payroll.view_payslip"),
     # The audit trail screen (who changed what and when).
     ("view_audit_trail", "auditlog.view_logentry"),
