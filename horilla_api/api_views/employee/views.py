@@ -390,26 +390,47 @@ class EmployeeBankDetailsAPIView(APIView):
                 bank_detail.employee_id,
                 bank_detail.employee_id.get_reporting_manager(),
             ]
-        ) or request.user.has_perm("employee.view_employeebankdetails"):
+        ) or (
+            request.user.has_perm("employee.view_employeebankdetails")
+            or _manages_employees(request.user)
+        ):
             serializer = EmployeeBankDetailsSerializer(bank_detail)
             return Response(serializer.data)
 
         return Response({"message": _("No permission")}, status=400)
 
+    def post(self, request):
+        # Adding or changing employees covers their bank details, like the
+        # work information: it is a step of the same form.
+        if _manages_employees(request.user):
+            return self._create(request)
+        return self._guarded_create(request)
+
     @manager_or_owner_permission_required(
         EmployeeBankDetails, "employee.add_employeebankdetails"
     )
-    def post(self, request):
+    def _guarded_create(self, request):
+        return self._create(request)
+
+    def _create(self, request):
         serializer = EmployeeBankDetailsSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+    def put(self, request, pk):
+        if _manages_employees(request.user):
+            return self._update(request, pk)
+        return self._guarded_update(request, pk)
+
     @manager_or_owner_permission_required(
         EmployeeBankDetails, "employee.add_employeebankdetails"
     )
-    def put(self, request, pk):
+    def _guarded_update(self, request, pk):
+        return self._update(request, pk)
+
+    def _update(self, request, pk):
         try:
             bank_detail = EmployeeBankDetails.objects.get(pk=pk)
         except EmployeeBankDetails.DoesNotExist:
@@ -459,8 +480,8 @@ def _manages_employees(user):
     """
     Whether the caller may add or change employees.
 
-    That covers the work information too: it is one of the steps of adding
-    or editing an employee, so it does not need a second permission.
+    That covers the work information and bank details too: they are steps
+    of adding or editing an employee, so they do not need more permissions.
     """
     return user.has_perm("employee.add_employee") or user.has_perm(
         "employee.change_employee"

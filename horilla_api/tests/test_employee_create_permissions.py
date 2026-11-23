@@ -112,36 +112,70 @@ class EmployeeCreatePermissionTests(TestCase):
         read = self.client.get(f"{WORK}{work_id}/")
         self.assertNotEqual(read.status_code, 200)
 
-    def test_bank_details_can_be_created(self):
-        self._login(
-            "hire_bank", "add_employee", "view_employee", "add_employeebankdetails"
-        )
-        created = self._create("bank")
-        body = {
-            "employee_id": created.data["id"],
+    def _bank_body(self, employee_id, account):
+        return {
+            "employee_id": employee_id,
             "bank_name": "Stanbic",
-            "account_number": "0012345",
+            "account_number": account,
         }
-        saved = self.client.post(BANK, body, format="json")
-        self.assertEqual(saved.status_code, 201, saved.content)
-        self.assertTrue(
-            EmployeeBankDetails.objects.filter(
-                employee_id=created.data["id"], account_number="0012345"
-            ).exists()
+
+    def test_add_employee_covers_the_bank_step(self):
+        self._login("hire_bank", "add_employee", "view_employee")
+        created = self._create("bank")
+        saved = self.client.post(
+            BANK, self._bank_body(created.data["id"], "0012345"), format="json"
         )
+        self.assertEqual(saved.status_code, 201, saved.content)
+        bank = EmployeeBankDetails.objects.get(employee_id=created.data["id"])
+        self.assertEqual(bank.account_number, "0012345")
+
+        read = self.client.get(f"{BANK}{bank.id}/")
+        self.assertEqual(read.status_code, 200, read.content)
         # The create route creates and nothing else.
         self.assertEqual(self.client.get(BANK).status_code, 405)
 
-    def test_bank_details_still_need_their_own_permission(self):
-        self._login("hire_nobank", "add_employee", "view_employee")
-        created = self._create("nobank")
-        refused = self.client.post(
-            BANK,
-            {
-                "employee_id": created.data["id"],
-                "bank_name": "Stanbic",
-                "account_number": "0099999",
-            },
+    def test_change_employee_covers_the_bank_step(self):
+        self._login("hire_setup3", "add_employee", "view_employee")
+        created = self._create("bankchange")
+        employee_id = created.data["id"]
+        self._login("hire_bank_changer", "change_employee", "view_employee")
+        saved = self.client.post(
+            BANK, self._bank_body(employee_id, "0055555"), format="json"
+        )
+        self.assertEqual(saved.status_code, 201, saved.content)
+        updated = self.client.put(
+            f"{BANK}{saved.data['id']}/",
+            self._bank_body(employee_id, "0066666"),
             format="json",
         )
+        self.assertEqual(updated.status_code, 200, updated.content)
+        self.assertEqual(
+            EmployeeBankDetails.objects.get(pk=saved.data["id"]).account_number,
+            "0066666",
+        )
+
+    def test_no_employee_permission_cannot_touch_bank_details(self):
+        self._login("hire_setup4", "add_employee", "view_employee")
+        created = self._create("nobank")
+        employee_id = created.data["id"]
+        saved = self.client.post(
+            BANK, self._bank_body(employee_id, "0077777"), format="json"
+        )
+        self._login("hire_outsider")
+        refused = self.client.post(
+            BANK, self._bank_body(employee_id, "0099999"), format="json"
+        )
         self.assertEqual(refused.status_code, 403, refused.content)
+        rewritten = self.client.put(
+            f"{BANK}{saved.data['id']}/",
+            self._bank_body(employee_id, "0099999"),
+            format="json",
+        )
+        self.assertEqual(rewritten.status_code, 403, rewritten.content)
+        self.assertNotEqual(
+            self.client.get(f"{BANK}{saved.data['id']}/").status_code, 200
+        )
+        self.assertEqual(
+            EmployeeBankDetails.objects.get(pk=saved.data["id"]).account_number,
+            "0077777",
+        )
