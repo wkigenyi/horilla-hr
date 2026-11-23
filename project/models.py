@@ -230,8 +230,8 @@ class Project(HorillaModel):
         if self.end_date is not None:
             if self.end_date < self.start_date:
                 raise ValidationError({"document": "End date is less than start date"})
-            if self.end_date < date.today():
-                self.status = "expired"
+        # Status is never derived from the end date: projects are entered
+        # backdated too. "Expired" is a status someone chooses.
 
     def save(self, *args, **kwargs):
         is_new, request = self.pk is None, getattr(

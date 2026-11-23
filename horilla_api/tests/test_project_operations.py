@@ -318,6 +318,36 @@ class ProjectOperationTests(TestCase):
         self.assertEqual(task.status, "in_progress")
         self.assertIsNone(task.completed_at)
 
+    def test_backdated_project_is_never_expired_automatically(self):
+        user, employee = self._user(
+            "ops_old_project", "add_project", "change_project", "view_project"
+        )
+        self._auth(user)
+        ended = self.today - timedelta(days=30)
+        created = self.client.post(
+            "/api/v1/project/project/",
+            {
+                "title": "Entered after the fact",
+                "status": "in_progress",
+                "start_date": (ended - timedelta(days=30)).isoformat(),
+                "end_date": ended.isoformat(),
+                "description": "Backdated",
+                "managers_ids": [employee.id],
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201, created.content)
+        self.assertEqual(created.data["status"], "in_progress")
+        url = f"/api/v1/project/project/{created.data['id']}/"
+
+        done = self.client.put(url, {"status": "completed"}, format="json")
+        self.assertEqual(done.status_code, 200, done.content)
+        self.assertEqual(done.data["status"], "completed")
+
+        renamed = self.client.put(url, {"title": "Closed out"}, format="json")
+        self.assertEqual(renamed.status_code, 200, renamed.content)
+        self.assertEqual(renamed.data["status"], "completed")
+
     def test_bulk_archive_skips_a_project_the_user_cannot_change(self):
         user, employee = self._user("ops_bulk")
         own = self._project("Archivable")
