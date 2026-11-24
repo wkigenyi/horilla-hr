@@ -13,6 +13,7 @@ from payroll.methods.tax_calc import compute_yearly_tax
 from payroll.models.models import (
     Contract,
     FilingStatus,
+    PayAdjustment,
     PayrollBatch,
     Payslip,
     SalaryStructure,
@@ -370,6 +371,88 @@ class PayrollApiTests(TestCase):
         )
         self.assertEqual(confirmed.status_code, 200, confirmed.data)
         self.assertEqual(confirmed.data["status"], "approved")
+
+    def _draft_adjustment(self, title, amount, pay_date="2026-02-15", kind="arrears"):
+        created = self.client.post(
+            "/api/v1/payroll/pay-adjustment/",
+            {
+                "employee_id": self.employee.pk,
+                "kind": kind,
+                "title": title,
+                "amount": amount,
+                "pay_date": pay_date,
+                "tax_treatment": False,
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201, created.data)
+        return created.data["id"]
+
+    def test_pay_adjustment_bulk_status_confirms_and_reverts_together(self):
+        first = self._draft_adjustment("Back pay", 500)
+        second = self._draft_adjustment("Overpaid", 200, kind="recovery")
+        confirmed = self.client.post(
+            "/api/v1/payroll/pay-adjustment/bulk-status/",
+            {"ids": [first, second], "status": "approved"},
+            format="json",
+        )
+        self.assertEqual(confirmed.status_code, 200, confirmed.data)
+        self.assertEqual(confirmed.data["updated"], 2)
+        self.assertEqual(confirmed.data["problems"], [])
+        self.assertEqual(
+            set(
+                PayAdjustment.objects.filter(pk__in=[first, second]).values_list(
+                    "status", flat=True
+                )
+            ),
+            {"approved"},
+        )
+        reverted = self.client.post(
+            "/api/v1/payroll/pay-adjustment/bulk-status/",
+            {"ids": [first, second], "status": "draft"},
+            format="json",
+        )
+        self.assertEqual(reverted.status_code, 200, reverted.data)
+        self.assertEqual(reverted.data["updated"], 2)
+        for entry in PayAdjustment.objects.filter(pk__in=[first, second]):
+            self.assertEqual(entry.status, "draft")
+            self.assertIsNone(entry.pay_line())
+
+    def test_pay_adjustment_bulk_status_names_what_it_could_not_change(self):
+        good = self._draft_adjustment("Back pay", 500)
+        late = self._draft_adjustment("Late claim", 300, pay_date="2026-03-15")
+        Payslip.objects.create(
+            employee_id=self.employee,
+            start_date=date(2026, 3, 1),
+            end_date=date(2026, 3, 31),
+            pay_head_data={},
+        )
+        response = self.client.post(
+            "/api/v1/payroll/pay-adjustment/bulk-status/",
+            {"ids": [good, late], "status": "approved"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["updated"], 1)
+        self.assertEqual(len(response.data["problems"]), 1)
+        self.assertIn("Late claim", response.data["problems"][0])
+        self.assertEqual(PayAdjustment.objects.get(pk=good).status, "approved")
+        self.assertEqual(PayAdjustment.objects.get(pk=late).status, "draft")
+
+    def test_pay_adjustment_bulk_status_rejects_bad_input(self):
+        entry = self._draft_adjustment("Back pay", 500)
+        bad_status = self.client.post(
+            "/api/v1/payroll/pay-adjustment/bulk-status/",
+            {"ids": [entry], "status": "paid"},
+            format="json",
+        )
+        self.assertEqual(bad_status.status_code, 400)
+        no_ids = self.client.post(
+            "/api/v1/payroll/pay-adjustment/bulk-status/",
+            {"ids": [], "status": "approved"},
+            format="json",
+        )
+        self.assertEqual(no_ids.status_code, 400)
 
     def test_currency_round_trip(self):
         saved = self.client.put(

@@ -2,6 +2,7 @@ from django.urls import path
 
 from horilla_api.api_views.dashboard.views import PayrollDashboardWidgetAPIView
 from horilla_api.api_views.payroll.adjustments import (
+    PayAdjustmentBulkStatusView,
     PayAdjustmentImportConfirmView,
     PayAdjustmentImportErrorsView,
     PayAdjustmentImportTemplateView,
@@ -158,6 +159,11 @@ urlpatterns = [
         "pay-adjustment/import/",
         PayAdjustmentImportView.as_view(),
         name="api-pay-adjustment-import",
+    ),
+    path(
+        "pay-adjustment/bulk-status/",
+        PayAdjustmentBulkStatusView.as_view(),
+        name="api-pay-adjustment-bulk-status",
     ),
     path("pay-adjustment/", PayAdjustmentView.as_view(), name="api-pay-adjustment"),
     path(

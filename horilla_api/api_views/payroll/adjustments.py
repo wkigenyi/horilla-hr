@@ -19,7 +19,13 @@ from payroll.methods.pay_adjustment_import import (
 )
 from payroll.models.models import PayAdjustment
 
-from .common import employee_brief, parse_date, require_perm, validation_response
+from .common import (
+    as_id_list,
+    employee_brief,
+    parse_date,
+    require_perm,
+    validation_response,
+)
 
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -162,6 +168,32 @@ class PayAdjustmentStatusView(APIView):
             return validation_response(exc)
         entry.refresh_from_db()
         return Response(_adjustment_payload(entry), status=200)
+
+
+class PayAdjustmentBulkStatusView(APIView):
+    """Confirm several entries, or send several back to draft, by the rules of one."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        blocked = require_perm(request, "payroll.change_payadjustment")
+        if blocked:
+            return blocked
+        wanted = request.data.get("status")
+        if wanted not in ("approved", "draft"):
+            return Response({"status": [_("Status must be approved or draft.")]}, status=400)
+        ids = as_id_list(request.data.get("ids"))
+        if not ids:
+            return Response({"ids": [_("Select at least one entry.")]}, status=400)
+        entries = list(PayAdjustment.objects.filter(pk__in=ids))
+        updated, problems = PayAdjustment.bulk_change(
+            entries,
+            status=wanted,
+            approved_by=getattr(request.user, "employee_get", None),
+        )
+        return Response(
+            {"updated": updated, "problems": problems, "status": wanted}, status=200
+        )
 
 
 class PayAdjustmentImportTemplateView(APIView):
