@@ -285,10 +285,29 @@ def _may_view_employee_access(request, employee):
 
 
 def _employee_roles(user):
+    """The person's roles, each with the companies it applies in.
+
+    With company scoping on, a role only grants anything in the companies it
+    is assigned for, so a role listed with no company is not in effect.
+    ``companies`` is always empty when scoping is off (roles are global).
+    """
+    companies = {}
+    if company_scoped_active():
+        rows = user.company_group_assignments.select_related("company").order_by(
+            "company__company"
+        )
+        for row in rows:
+            companies.setdefault(row.group_id, []).append(row.company.company)
     return [
-        {"id": group.id, "name": group.name}
+        {"id": group.id, "name": group.name, "companies": companies.get(group.id, [])}
         for group in user.groups.all().order_by("name")
     ]
+
+
+def _work_company_name(employee):
+    """The company this person's sign-in resolves permissions against."""
+    company = getattr(getattr(employee, "employee_work_info", None), "company_id", None)
+    return company.company if company else None
 
 
 class RoleListAPIView(APIView):
@@ -475,6 +494,8 @@ class EmployeePermissionsAPIView(APIView):
                 "id": employee.id,
                 "name": employee.get_full_name(),
                 "roles": _employee_roles(user),
+                "company_scoped": company_scoped_active(),
+                "company": _work_company_name(employee),
                 "permissions": (
                     _assigned_ids(user.user_permissions.all())
                     if _may_read_direct_permissions(request.user)

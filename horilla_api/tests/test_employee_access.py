@@ -1,9 +1,10 @@
 """Employee roles are readable by self / view_employee; direct perms use auth.*_permission."""
 
 from django.contrib.auth.models import Group, Permission
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
+from base.models import CompanyGroupAssignment
 from horilla.horilla_middlewares import set_selected_company
 from horilla.testkit import make_company, make_employee, make_user
 
@@ -44,9 +45,38 @@ class EmployeeAccessTests(TestCase):
         response = self.client.get(access_url(self.employee.id))
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(
-            response.data["roles"], [{"id": self.role.id, "name": "Payroll readers"}]
+            response.data["roles"],
+            [{"id": self.role.id, "name": "Payroll readers", "companies": []}],
         )
         self.assertEqual(response.data["permissions"], [])
+
+    def test_roles_name_the_companies_they_apply_in(self):
+        other_company = make_company("Access Branch")
+        for company in (self.company, other_company):
+            CompanyGroupAssignment.objects.create(
+                user=self.user, group=self.role, company=company
+            )
+        unassigned = Group.objects.create(name="Unassigned role")
+        self.user.groups.add(unassigned)
+        self.client.force_authenticate(user=self.user)
+        with override_settings(COMPANY_SCOPED_PERMISSIONS=True):
+            response = self.client.get(access_url(self.employee.id))
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(response.data["company_scoped"])
+        self.assertEqual(response.data["company"], "Access Co")
+        roles = {role["name"]: role["companies"] for role in response.data["roles"]}
+        self.assertEqual(roles["Payroll readers"], ["Access Branch", "Access Co"])
+        self.assertEqual(roles["Unassigned role"], [])
+
+    def test_roles_carry_no_company_when_scoping_is_off(self):
+        CompanyGroupAssignment.objects.create(
+            user=self.user, group=self.role, company=self.company
+        )
+        self.client.force_authenticate(user=self.user)
+        with override_settings(COMPANY_SCOPED_PERMISSIONS=False):
+            response = self.client.get(access_url(self.employee.id))
+        self.assertFalse(response.data["company_scoped"])
+        self.assertEqual(response.data["roles"][0]["companies"], [])
 
     def test_another_employee_cannot_read_those_roles(self):
         other = make_user("access_other", password=PASSWORD)
