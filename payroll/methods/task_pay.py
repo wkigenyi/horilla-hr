@@ -171,4 +171,8 @@ def unlink_tasks_for_adjustment(adjustment):
     """Clear Task.payroll_adjustment for tasks linked to this entry."""
     from project.models import Task
 
-    Task.objects.filter(payroll_adjustment=adjustment).update(payroll_adjustment=None)
+    # Not Task.objects: a task is unlinked whichever company is selected, and the company
+    # filter's join through this link fails when a company is selected.
+    Task._base_manager.filter(payroll_adjustment=adjustment).update(
+        payroll_adjustment=None
+    )
