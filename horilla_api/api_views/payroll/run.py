@@ -24,9 +24,18 @@ from .common import (
 )
 
 
-def _period_payload(settings, today=None):
+def _period_payload(settings, today=None, company=None):
+    from payroll.models.pay_period import PayPeriod
+
     today = today or date.today()
-    current = settings.period_for(today)
+    # The period the company is actually in: the one someone opened and has
+    # not closed yet. Only a company with no periods falls back to the date.
+    company = company or settings.company_id
+    current = (
+        PayPeriod.dates_for(company, today)
+        if company is not None
+        else settings.period_for(today)
+    )
     last = settings.last_completed_period(today)
     auto = settings.next_auto_run(today) if settings.pk else (last[0], last[1], last[1])
     return {
@@ -76,8 +85,14 @@ class PayPeriodView(APIView):
             if row is None:
                 return Response({"detail": _("Pay period not found.")}, status=404)
             return Response(_period_payload(row), status=200)
-        rows = PayPeriodSettings.objects.entire().order_by("company_id_id", "pk")
-        return Response([_period_payload(row) for row in rows], status=200)
+        # The one setting in force for the company in view, not every
+        # company's: callers take the first row as "the pay period".
+        company = company_for(request)
+        row = PayPeriodSettings.for_company(company)
+        rows = [row] if row.pk else []
+        return Response(
+            [_period_payload(row, company=company) for row in rows], status=200
+        )
 
     def post(self, request):
         blocked = require_perm(request, "payroll.change_payslipautogenerate")

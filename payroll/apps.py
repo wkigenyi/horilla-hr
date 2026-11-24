@@ -36,6 +36,11 @@ class PayrollConfig(AppConfig):
         from django.db.models.signals import post_migrate
 
         post_migrate.connect(seed_system_components, sender=self)
+
+        # Closed pay periods lock what feeds pay. See payroll/methods/period_lock.py.
+        from payroll.methods import period_lock
+
+        period_lock.connect()
         return ready
 
 

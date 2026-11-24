@@ -9,6 +9,10 @@ from horilla_api.api_views.payroll.adjustments import (
     PayAdjustmentStatusView,
     PayAdjustmentView,
 )
+from horilla_api.api_views.payroll.periods import (
+    PayPeriodActionView,
+    PayPeriodsView,
+)
 from horilla_api.api_views.payroll.task_earnings import (
     TaskEarningsPostView,
     TaskEarningsPreviewView,
@@ -99,6 +103,17 @@ urlpatterns = [
     path("allowance/<int:pk>", AllowanceView.as_view(), name=""),
     path("deduction", DeductionView.as_view(), name=""),
     path("deduction/<int:pk>", DeductionView.as_view(), name=""),
+    path("pay-periods/", PayPeriodsView.as_view(), name="api-pay-periods"),
+    path(
+        "pay-periods/<int:pk>/close/",
+        PayPeriodActionView.as_view(action="close"),
+        name="api-pay-periods-close",
+    ),
+    path(
+        "pay-periods/<int:pk>/reopen/",
+        PayPeriodActionView.as_view(action="reopen"),
+        name="api-pay-periods-reopen",
+    ),
     path("pay-period/", PayPeriodView.as_view(), name="api-pay-period"),
     path("pay-period/<int:pk>/", PayPeriodView.as_view(), name="api-pay-period-detail"),
     path(

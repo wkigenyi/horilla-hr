@@ -50,6 +50,23 @@ def as_id_list(value):
 
 
 def company_for(request):
+    """
+    The company a payroll request is about.
+
+    The company the request is scoped to comes first: the one picked in the
+    switcher for a superuser, the work company for everyone else. Only when no
+    single company is selected ("All companies") does it fall back to the
+    caller's own employer, so payroll run for a sister company uses that
+    company's pay period and settings rather than the caller's.
+    """
+    from base.models import Company
+    from horilla.horilla_middlewares import get_selected_company
+
+    selected = get_selected_company()
+    if selected and selected != "all":
+        company = Company._base_manager.filter(pk=selected).first()
+        if company is not None:
+            return company
     employee = getattr(request.user, "employee_get", None)
     getter = getattr(employee, "get_company", None)
     return getter() if getter else None

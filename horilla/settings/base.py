@@ -109,6 +109,8 @@ INSTALLED_APPS = [
 # ========================================
 
 REST_FRAMEWORK = {
+    # Adds a 400 for changes refused inside a closed pay period.
+    "EXCEPTION_HANDLER": "horilla_api.exceptions.api_exception_handler",
     "DEFAULT_FILTER_BACKENDS": ["django_filters.rest_framework.DjangoFilterBackend"],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "DEFAULT_AUTHENTICATION_CLASSES": (

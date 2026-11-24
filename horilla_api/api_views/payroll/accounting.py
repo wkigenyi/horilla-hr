@@ -39,8 +39,9 @@ CSV_COLUMNS = (
 
 def _period(request):
     company = company_for(request)
-    settings = PayPeriodSettings.for_company(company)
-    default_start, default_end = settings.period_for(date.today())
+    from payroll.models.pay_period import PayPeriod
+
+    default_start, default_end = PayPeriod.dates_for(company)
     start = parse_date(request.GET.get("start_date")) or default_start
     end = parse_date(request.GET.get("end_date")) or default_end
     return company, start, end

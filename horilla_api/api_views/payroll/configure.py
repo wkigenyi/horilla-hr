@@ -885,8 +885,9 @@ class ContributionView(APIView):
         blocked = require_perm(request, "payroll.view_payslip")
         if blocked:
             return blocked
-        settings = PayPeriodSettings.for_company(company_for(request))
-        default_start, default_end = settings.period_for(date.today())
+        from payroll.models.pay_period import PayPeriod
+
+        default_start, default_end = PayPeriod.dates_for(company_for(request))
         start = parse_date(request.GET.get("start_date")) or default_start
         end = parse_date(request.GET.get("end_date")) or default_end
         payslips = _contribution_payslips(request, start, end)

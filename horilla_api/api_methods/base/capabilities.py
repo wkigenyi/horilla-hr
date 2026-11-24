@@ -97,6 +97,11 @@ _PERMISSIONS = (
     ("add_deduction", "payroll.add_deduction"),
     ("change_deduction", "payroll.change_deduction"),
     ("delete_deduction", "payroll.delete_deduction"),
+    # Pay periods as records: open (add), close (change), reopen.
+    ("view_payperiod", "payroll.view_payperiod"),
+    ("add_payperiod", "payroll.add_payperiod"),
+    ("change_payperiod", "payroll.change_payperiod"),
+    ("reopen_payperiod", "payroll.reopen_payperiod"),
     ("view_payrollsettings", "payroll.view_payrollsettings"),
     ("change_payrollsettings", "payroll.change_payrollsettings"),
     ("change_encashmentgeneralsettings", "payroll.change_encashmentgeneralsettings"),
