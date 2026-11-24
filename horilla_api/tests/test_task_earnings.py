@@ -1,6 +1,7 @@
 """API: preview and post task earnings into draft pay adjustments."""
 
 from datetime import date
+from unittest import mock
 
 from django.contrib.auth.models import Permission
 from django.test import TestCase
@@ -89,6 +90,50 @@ class TaskEarningsApiTests(TestCase):
         )
         self.assertEqual(again.status_code, 200, again.data)
         self.assertEqual(again.data["created"], [])
+
+    def _preview_names_for(self, selected):
+        with mock.patch(
+            "horilla_api.api_views.payroll.task_earnings.get_selected_company",
+            return_value=selected,
+        ):
+            preview = self.client.get(
+                "/api/v1/payroll/task-earnings/preview/",
+                {"start_date": "2026-04-01", "end_date": "2026-04-30"},
+            )
+        self.assertEqual(preview.status_code, 200, preview.data)
+        return {
+            title for row in preview.data["employees"] for title in row["titles"]
+        }
+
+    def test_scope_is_the_selected_company_not_the_callers_own(self):
+        # The caller works for Task Earn Co; the work was done for a sister
+        # company. Posting used to look only in the caller's own employer.
+        sister = make_company("Task Earn Sister")
+        project = Project.objects.create(
+            title="Sister work",
+            status="new",
+            start_date=date(2026, 4, 1),
+            description="Work",
+            company_id=sister,
+        )
+        task = Task(
+            title="Sister install",
+            project=project,
+            description="Install kit",
+            status="completed",
+            is_payable=True,
+            completed_at=date(2026, 4, 15),
+        )
+        task.save()
+        task.task_members.add(self.other)
+        TaskPayAllocation.objects.create(task=task, employee=self.other, amount=60)
+
+        self.assertEqual(
+            self._preview_names_for(None), {"Install", "Sister install"}
+        )
+        self.assertEqual(self._preview_names_for("all"), {"Install", "Sister install"})
+        self.assertEqual(self._preview_names_for(sister.pk), {"Sister install"})
+        self.assertEqual(self._preview_names_for(self.company.pk), {"Install"})
 
     def test_task_serializer_accepts_pay_allocations(self):
         created = self.client.post(
