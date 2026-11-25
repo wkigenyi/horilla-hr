@@ -41,6 +41,53 @@ class PayrollDashboardTests(TestCase):
             self.assertEqual(response.status_code, 200, (slug, response.content))
             response.json()
 
+    def test_contracts_widget_names_each_contract(self):
+        """Each row carries the contract id, so the dashboard can open that contract."""
+        from datetime import date, timedelta
+
+        from horilla.testkit.factories import make_contract, make_employee
+        from payroll.models.models import Contract
+
+        manager = make_user("contract_viewer", password="secret123", is_superuser=True)
+        make_employee(company=self.company, email="viewer@test.horilla", user=manager)
+        employee = make_employee(company=self.company, email="ending@test.horilla")
+        Contract.objects.filter(employee_id=employee).delete()
+        today = date.today()
+        ended = make_contract(
+            employee=employee,
+            name="Ended",
+            start_date=today - timedelta(days=300),
+            end_date=today - timedelta(days=31),
+        )
+        ending = make_contract(
+            employee=employee,
+            name="Ending soon",
+            start_date=today - timedelta(days=30),
+            end_date=today + timedelta(days=10),
+        )
+        Contract.objects.filter(pk=ending.pk).update(contract_status="active")
+
+        # A real sign-in: the widget runs a session view, which a forced DRF user never reaches.
+        login = self.client.post(
+            "/api/v1/auth/login/",
+            {"username": "contract_viewer", "password": "secret123"},
+            format="json",
+        )
+        self.assertEqual(login.status_code, 200, login.content)
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+        response = client.get(widget_url("contracts"))
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()
+        self.assertEqual(
+            [(row["contract_id"], row["id"]) for row in data["ending_soon"]],
+            [(ending.id, employee.id)],
+        )
+        self.assertEqual(
+            [(row["contract_id"], row["id"]) for row in data["expired"]],
+            [(ended.id, employee.id)],
+        )
+
     def test_unknown_widget_is_404(self):
         self.client.force_authenticate(user=self.user)
         self.assertEqual(self.client.get(widget_url("nope")).status_code, 404)

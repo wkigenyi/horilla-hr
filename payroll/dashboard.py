@@ -388,6 +388,7 @@ def payroll_contract_status(request):
             ending_soon.append(
                 {
                     "id": emp.id if emp else None,
+                    "contract_id": c.id,
                     "name": emp.get_full_name() if emp else "—",
                     "avatar": emp.get_avatar() if emp else None,
                     "end_date": c.contract_end_date.strftime("%b %d, %Y"),
@@ -412,6 +413,7 @@ def payroll_contract_status(request):
             expired.append(
                 {
                     "id": emp.id if emp else None,
+                    "contract_id": c.id,
                     "name": emp.get_full_name() if emp else "—",
                     "end_date": c.contract_end_date.strftime("%b %d, %Y"),
                     "days_ago": (today - c.contract_end_date).days,
