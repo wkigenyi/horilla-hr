@@ -12,6 +12,7 @@ These tests pin the same protection on the delete path.
 """
 
 import json
+from datetime import date
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
@@ -20,6 +21,7 @@ from django.urls import reverse
 
 from employee.models import Employee
 from horilla.testkit import make_company, make_employee, make_user
+from horilla.testkit.factories import make_contract
 from payroll.models.models import Contract
 
 User = get_user_model()
@@ -38,14 +40,20 @@ class LastSuperuserDeleteGuardTests(TestCase):
             first_name=username,
             user=user,
         )
-        # make_employee()'s EmployeeWorkInformation save auto-creates an
-        # *active* Contract (payroll/signals.py). employee_delete never
-        # touches active contracts -- deliberately, it's the one thing it
-        # already refuses to cascade-delete -- so it would raise
-        # ProtectedError before the guard under test ever runs. Deactivating
-        # it here isolates the last-superuser check from that unrelated,
-        # pre-existing behavior.
+        # employee_delete never touches active contracts -- deliberately, it's
+        # the one thing it already refuses to cascade-delete -- so one would
+        # raise ProtectedError before the guard under test ever runs. Keeping
+        # any contract inactive isolates the last-superuser check from that
+        # unrelated behavior.
         Contract.objects.filter(employee_id=employee).update(contract_status="expired")
+        return employee
+
+    def _blocked(self, email, first_name):
+        """An employee an active contract keeps from being deleted (PROTECT)."""
+        employee = make_employee(
+            company=self.company, email=email, first_name=first_name
+        )
+        make_contract(employee=employee, start_date=date(2026, 1, 1), status="active")
         return employee
 
     def _client_as(self, employee):
@@ -197,9 +205,7 @@ class LastSuperuserDeleteGuardTests(TestCase):
 
     def test_bulk_delete_reports_blocked_employees_in_the_summary(self):
         admin = self._superuser_employee("sum-admin")
-        blocked = make_employee(
-            company=self.company, email="sum-blocked@test.horilla", first_name="Blocked"
-        )  # keeps the active contract make_employee() creates -> PROTECT
+        blocked = self._blocked("sum-blocked@test.horilla", "Blocked")
         client = self._client_as(admin)
 
         response = client.post(
@@ -222,9 +228,7 @@ class LastSuperuserDeleteGuardTests(TestCase):
             )
             Contract.objects.filter(employee_id=e).update(contract_status="expired")
             free.append(e.pk)
-        blocked = make_employee(
-            company=self.company, email="many-blocked@test.horilla", first_name="B"
-        )  # active contract -> PROTECT
+        blocked = self._blocked("many-blocked@test.horilla", "B")
         client = self._client_as(admin)
 
         response = client.post(

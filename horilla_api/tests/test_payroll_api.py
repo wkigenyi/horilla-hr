@@ -9,6 +9,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from horilla.horilla_middlewares import set_selected_company
 from horilla.testkit import make_company, make_employee, make_user
+from horilla.testkit.factories import make_contract
 from payroll.methods.tax_calc import compute_yearly_tax
 from payroll.models.models import (
     Contract,
@@ -20,6 +21,12 @@ from payroll.models.models import (
 )
 from payroll.models.tax_models import TaxBracket
 from payroll.system_components import policy, seed
+
+
+def _on_contract(*employees):
+    """Give each an active contract, which make_employee() no longer does."""
+    for employee in employees:
+        make_contract(employee=employee, start_date=date(2026, 1, 1), status="active")
 
 
 class PayrollApiTests(TestCase):
@@ -484,6 +491,7 @@ class PayrollApiTests(TestCase):
         mine = make_employee(
             company=self.company, email="mine_struct@test.horilla", first_name="Mine"
         )
+        _on_contract(free, taken, none, mine)
         Contract.objects.filter(employee_id=taken).update(salary_structure_id=other)
         Contract.objects.filter(employee_id=mine).update(salary_structure_id=structure)
         Contract.objects.filter(employee_id=none).update(contract_status="expired")
@@ -515,6 +523,7 @@ class PayrollApiTests(TestCase):
         add = make_employee(
             company=self.company, email="add_struct@test.horilla", first_name="Add"
         )
+        _on_contract(keep, drop, add)
         for employee in (keep, drop):
             contract = Contract.objects.filter(
                 employee_id=employee, contract_status="active"
@@ -557,6 +566,7 @@ class PayrollApiTests(TestCase):
         none = make_employee(
             company=self.company, email="bad_none@test.horilla", first_name="None"
         )
+        _on_contract(taken, none)
         Contract.objects.filter(employee_id=taken).update(salary_structure_id=other)
         Contract.objects.filter(employee_id=none).update(contract_status="expired")
 

@@ -1,6 +1,9 @@
+from django.db import transaction
+from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
-from base.models import Department, EmployeeType, JobPosition
+from base.auth_backends import company_scoped_active, get_allowed_company_ids
+from base.models import Company, Department, EmployeeType, JobPosition
 from employee.models import (
     Actiontype,
     DisciplinaryAction,
@@ -124,6 +127,58 @@ class EmployeeSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         validated_data["badge_id"] = get_next_badge_id()
         return super().create(validated_data)
+
+
+class EmployeeCreateSerializer(EmployeeSerializer):
+    """
+    A new employee, with the company and joining date they cannot be added without.
+
+    Both live on the work information, so they are written there in the same
+    transaction. ``create_contract`` (on unless turned off) gives the employee a
+    draft contract starting on the joining date; payroll uses it once someone
+    confirms the pay and activates it.
+    """
+
+    company_id = serializers.PrimaryKeyRelatedField(
+        queryset=Company.objects.all(),
+        write_only=True,
+        error_messages={"required": _("Choose a company."), "null": _("Choose a company.")},
+    )
+    date_joining = serializers.DateField(
+        write_only=True,
+        error_messages={
+            "required": _("Enter the joining date."),
+            "null": _("Enter the joining date."),
+        },
+    )
+    create_contract = serializers.BooleanField(write_only=True, default=True)
+
+    def validate_company_id(self, company):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if (
+            user is not None
+            and company_scoped_active()
+            and not user.is_superuser
+            and company.pk not in set(get_allowed_company_ids(user) or [])
+        ):
+            raise serializers.ValidationError(_("You cannot add people to that company."))
+        return company
+
+    def create(self, validated_data):
+        company = validated_data.pop("company_id")
+        joined = validated_data.pop("date_joining")
+        with_contract = validated_data.pop("create_contract", True)
+        with transaction.atomic():
+            employee = super().create(validated_data)
+            work_info, _created = EmployeeWorkInformation.objects.get_or_create(
+                employee_id=employee
+            )
+            work_info.company_id = company
+            work_info.date_joining = joined
+            work_info.skip_draft_contract = not with_contract
+            work_info.save()
+        return employee
 
 
 class EmployeeSelfSerializer(serializers.ModelSerializer):

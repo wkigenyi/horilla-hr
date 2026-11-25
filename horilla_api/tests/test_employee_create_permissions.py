@@ -49,6 +49,8 @@ class EmployeeCreatePermissionTests(TestCase):
                 "employee_last_name": tag,
                 "email": f"new.{tag}@test.horilla",
                 "is_active": True,
+                "company_id": self.company.id,
+                "date_joining": "2026-01-05",
             },
             format="json",
         )

@@ -1,15 +1,13 @@
-from datetime import datetime
-
 from django.apps import apps
 from django.db.models import Q
 from django.db.models.signals import m2m_changed, post_delete, post_save, pre_save
 from django.dispatch import receiver
 
 from employee.models import Employee, EmployeeWorkInformation
+from payroll.methods.contract_start import create_draft_contract, follow_joining_date
 from payroll.methods.deductions import create_deductions
 from payroll.models.models import (
     Allowance,
-    Contract,
     Deduction,
     EncashmentGeneralSettings,
     LoanAccount,
@@ -42,35 +40,45 @@ def encashment_settings_filtered_employees(sender, instance, action, **kwargs):
     instance.filtered_employees.set(employees)
 
 
+@receiver(pre_save, sender=EmployeeWorkInformation)
+def employeeworkinformation_pre_save(sender, instance, **kwargs):
+    """Remember the joining date before the save, so a draft contract can follow it."""
+    instance._joining_before = (
+        EmployeeWorkInformation.objects.filter(pk=instance.pk)
+        .values_list("date_joining", flat=True)
+        .first()
+        if instance.pk and not kwargs.get("raw")
+        else None
+    )
+
+
 @receiver(post_save, sender=EmployeeWorkInformation)
 def employeeworkinformation_post_save(sender, instance, **_kwargs):
     """
-    This method is used to override the save method for EmployeeWorkInformation Model
+    Give an active employee a draft contract once they have a joining date.
+
+    The contract starts on the joining date and stays a draft, so its pay is
+    confirmed before payroll uses it. It used to be made on the first save,
+    before the joining date or salary were filled in: active, dated the day the
+    employee was added, at a wage of 0. A draft that started on the old joining
+    date moves with it when the joining date changes.
+
+    Set ``skip_draft_contract`` on the work information to save it without
+    making a contract, when whoever added the employee chose not to.
     """
     # Skip during fixture load — demo contracts come from payroll_data.json
     if _kwargs.get("raw"):
         return
 
-    active_employee = (
-        instance.employee_id
-        if instance.employee_id and instance.employee_id.is_active == True
-        else None
+    employee = instance.employee_id
+    if employee is None or not employee.is_active or instance.date_joining is None:
+        return
+    follow_joining_date(
+        employee, getattr(instance, "_joining_before", None), instance.date_joining
     )
-    if active_employee is not None:
-        all_contracts = Contract.objects.entire()
-        contract_exists = all_contracts.filter(employee_id_id=active_employee).exists()
-        if not contract_exists:
-            contract = Contract()
-            contract.contract_name = f"{active_employee}'s Contract"
-            contract.employee_id = active_employee
-            contract.contract_start_date = (
-                instance.date_joining if instance.date_joining else datetime.today()
-            )
-            contract.wage = (
-                instance.basic_salary if instance.basic_salary is not None else 0
-            )
-            contract.contract_status = "active"
-            contract.save()
+    if getattr(instance, "skip_draft_contract", False):
+        return
+    create_draft_contract(employee, instance)
 
 
 @receiver(post_save, sender=Allowance)

@@ -19,6 +19,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from horilla.horilla_middlewares import set_selected_company
 from horilla.testkit import make_company, make_employee, make_user
+from horilla.testkit.factories import make_contract
 from horilla_audit.registry import apply_audit_configuration
 from payroll.models.models import Contract, PayrollBatch
 
@@ -50,6 +51,9 @@ class AuditTrailApiTests(TestCase):
             first_name="Amina",
             last_name="Okello",
             user=self.admin,
+        )
+        make_contract(
+            employee=self.admin_employee, start_date=date(2026, 1, 1), status="active"
         )
         self.client = APIClient()
         _bearer(self.client, self.admin)

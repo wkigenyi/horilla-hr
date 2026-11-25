@@ -17,6 +17,7 @@ from payroll.models.models import (
     Reimbursement,
     ReimbursementMultipleAttachment,
 )
+from payroll.methods.contract_start import start_before_joining_error
 from payroll.models.tax_models import TaxBracket
 
 
@@ -89,6 +90,23 @@ class ContractSerializer(serializers.ModelSerializer):
             return employee_profile.url
         except:
             return None
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        instance = self.instance
+        employee = attrs.get("employee_id", getattr(instance, "employee_id", None))
+        start = attrs.get(
+            "contract_start_date", getattr(instance, "contract_start_date", None)
+        )
+        # An existing contract is only checked when its start or employee changes.
+        if instance is not None and (
+            employee == instance.employee_id and start == instance.contract_start_date
+        ):
+            return attrs
+        message = start_before_joining_error(employee, start)
+        if message:
+            raise serializers.ValidationError({"contract_start_date": message})
+        return attrs
 
     class Meta:
         model = Contract

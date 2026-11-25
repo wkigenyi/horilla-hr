@@ -1152,12 +1152,37 @@ class Contract(HorillaModel):
     def __str__(self) -> str:
         return f"{self.contract_name} -{self.contract_start_date} - {self.contract_end_date}"
 
+    def starts_before_joining_error(self):
+        """
+        Why this contract may not start when it does, or None.
+
+        Checked when a contract is made, or its start date or employee changes,
+        so an older contract that already starts too early can still be edited.
+        """
+        from payroll.methods.contract_start import start_before_joining_error
+
+        if not self.employee_id_id or self.contract_start_date is None:
+            return None
+        if self.pk:
+            before = (
+                Contract.objects.entire()
+                .filter(pk=self.pk)
+                .values_list("employee_id_id", "contract_start_date")
+                .first()
+            )
+            if before == (self.employee_id_id, self.contract_start_date):
+                return None
+        return start_before_joining_error(self.employee_id, self.contract_start_date)
+
     def clean(self):
         if self.contract_end_date is not None:
             if self.contract_end_date < self.contract_start_date:
                 raise ValidationError(
                     {"contract_end_date": _("End date must be greater than start date")}
                 )
+        early = self.starts_before_joining_error()
+        if early:
+            raise ValidationError({"contract_start_date": early})
         if (
             self.contract_status == "active"
             and Contract.objects.filter(

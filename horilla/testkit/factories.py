@@ -218,7 +218,13 @@ def make_contract(
     wage: float = 60000,
     name: str = "Test Contract",
     end_date=None,
+    status: str = "draft",
 ):
+    """
+    A contract for ``employee``. ``make_employee`` no longer makes one: a new
+    employee's contract waits for the joining date and is a draft. Pass
+    ``status="active"`` for one payroll will use.
+    """
     from payroll.models.models import Contract
 
     return Contract.objects.create(
@@ -227,6 +233,7 @@ def make_contract(
         contract_start_date=start_date,
         contract_end_date=end_date,
         wage=wage,
+        contract_status=status,
     )
 
 

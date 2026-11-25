@@ -575,6 +575,7 @@ class UpdateModeTests(TestCase):
             "Email": "nia@acme.test",
             "Phone": "9876511111",
             "Company": "Acme Ltd",
+            "Date Joining": "2024-06-12",
         }
         known = {
             "Badge ID": "E-1",
@@ -935,6 +936,7 @@ class CompanyScopeTests(TestCase):
             "Work Email": email,
             "Mobile": extra.pop("phone", "9876543210"),
             "Dept": extra.pop("dept", "Sales"),
+            "Start Date": extra.pop("joined", "2024-06-12"),
         }
         if company is not None:
             row["Entity"] = company
@@ -986,10 +988,12 @@ class CompanyScopeTests(TestCase):
         self.assertTrue(Company.objects.filter(company="alpha ltd").exists())
         self.assertEqual(Company.objects.filter(company__iexact="alpha ltd").count(), 2)
 
-    def test_all_companies_a_row_without_a_company_has_none(self):
+    def test_all_companies_a_row_without_a_company_is_refused(self):
+        # Nobody is added without a company: their contract and payroll need one.
         self.select(None)
-        self.run_import([self.person("X-1", "x1@x.test")])
-        self.assertIsNone(self.company_of("X-1"))
+        job, data = self.run_import([self.person("X-1", "x1@x.test")])
+        self.assertEqual((data["valid"], data["error_count"]), (0, 1))
+        self.assertFalse(Employee.objects.entire().filter(badge_id="X-1").exists())
 
     def test_a_badge_id_or_email_reused_in_another_company_is_still_refused(self):
         self.select(None)
@@ -1182,6 +1186,7 @@ class SameNameAcrossCompaniesTests(TestCase):
             "Dept": "Sales",
             "Designation": "Manager",
             "Role": "Lead",
+            "Start Date": "2024-06-12",
         }
         row.update(extra)
         return row
@@ -2121,6 +2126,8 @@ class AccessTests(TestCase):
                             "First Name": "A",
                             "Email": "a@a.test",
                             "Phone": "9876543210",
+                            "Company": "Home keeper",
+                            "Date Joining": "2024-06-12",
                             "Password": "Secret#123",
                         },
                         {

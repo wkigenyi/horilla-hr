@@ -344,6 +344,10 @@ def process_employee_records(
             if joining_date > today:
                 errors["Joining Date Error"] = "Joining date cannot be in the future."
                 save = False
+        else:
+            # The contract starts on it, so nobody is added without one.
+            errors.setdefault("Joining Date Error", "Joining date is required.")
+            save = False
 
         contract_end_date = import_valid_date(
             emp.get("Contract End Date"),
@@ -424,6 +428,9 @@ def process_employee_records(
                 f"Company is required and must match the selected company "
                 f"'{selected_company.company}'."
             )
+            save = False
+        elif not company:
+            errors["Company Error"] = "Company is required."
             save = False
         elif selected_company and company != selected_company.company:
             errors["Company Error"] = (
