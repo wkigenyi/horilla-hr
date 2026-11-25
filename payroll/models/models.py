@@ -413,9 +413,13 @@ class Contract(HorillaModel):
         ("monthly", _("Monthly")),
         ("semi_monthly", _("Semi-Monthly")),
     )
+    # "task" is pay that is earned rather than agreed: a casual worker has no
+    # basic pay, and what they are paid is the task pay posted for the period
+    # (confirmed arrears entries). See Contract.paid_per_task.
     WAGE_CHOICES = [
         ("daily", _("Daily")),
         ("monthly", _("Monthly")),
+        ("task", _("Per task")),
     ]
 
     if apps.is_installed("attendance"):
@@ -964,9 +968,21 @@ class Contract(HorillaModel):
         fallback to `wage` is what keeps an hourly contract entered before that
         box existed paying exactly what it paid.
         """
+        if self.paid_per_task:
+            return 0.0
         if self.wage_type == "hourly" and self.hourly_wage:
             return self.hourly_wage
         return self.wage
+
+    @property
+    def paid_per_task(self):
+        """
+        A casual contract: no basic pay, paid only the task pay posted for the
+        period. Basic pay is zero on purpose here, so the payroll run does not
+        refuse the payslip the way it does for a contract that simply forgot
+        to state a wage.
+        """
+        return self.wage_type == "task"
 
     def get_wage_type_display(self):
         """
@@ -1167,6 +1183,9 @@ class Contract(HorillaModel):
                 _("A draft contract already exists for this employee.")
             )
 
+        if self.paid_per_task:
+            self._clean_paid_per_task()
+
         if self.wage_type in ["daily", "monthly"]:
             if not self.calculate_daily_leave_amount:
                 if self.deduction_for_one_leave_amount is None:
@@ -1175,6 +1194,47 @@ class Contract(HorillaModel):
                     )
 
         self._validate_against_salary_structure()
+
+    def _clean_paid_per_task(self):
+        """
+        A contract paid per task states no pay of its own, so nothing on it may
+        be read as basic pay, and nothing may be worked out from a basic that is
+        zero by design.
+
+        The figures are cleared rather than refused: a wage left over from an
+        earlier wage type would otherwise sit on the contract looking like pay.
+        Leave is not deducted either, because there is no day rate to price it.
+        """
+        self.wage = 0
+        self.hourly_wage = None
+        self.monthly_ctc = None
+        self.deduct_leave_from_basic_pay = False
+
+        structure = self.salary_structure_id
+        if structure is not None and structure.structure_mode == "ctc_down":
+            raise ValidationError(
+                {
+                    "salary_structure_id": _(
+                        "The %(structure)s structure is CTC Down: it divides a "
+                        "monthly package, and a contract paid per task has none. "
+                        "Choose a Gross Up structure, or none."
+                    )
+                    % {"structure": structure}
+                }
+            )
+
+        filing = self.filing_status
+        if filing is not None and filing.based_on == "basic_pay":
+            raise ValidationError(
+                {
+                    "filing_status": _(
+                        "%(filing)s works tax out from basic pay, and a contract "
+                        "paid per task has no basic pay, so no tax would be taken. "
+                        "Choose a filing status based on gross or taxable gross pay."
+                    )
+                    % {"filing": filing}
+                }
+            )
 
     def _validate_against_salary_structure(self):
         """
@@ -1189,7 +1249,7 @@ class Contract(HorillaModel):
         components, so that figure has to be stated.
         """
         structure = self.salary_structure_id
-        if structure is None:
+        if structure is None or self.paid_per_task:
             return
 
         if structure.structure_mode == "ctc_down":
@@ -3831,6 +3891,7 @@ class SalaryStructure(HorillaModel):
         """
         from payroll.methods.basic_pay_source import COMPONENT as BASIC_FROM_COMPONENT
         from payroll.methods.basic_pay_source import CONTRACT as BASIC_FROM_CONTRACT
+        from payroll.methods.basic_pay_source import TASKS as BASIC_FROM_TASKS
         from payroll.methods.basic_pay_source import resolve_basic_pay_source
 
         allowances = list(self.allowances.all())
@@ -3854,6 +3915,7 @@ class SalaryStructure(HorillaModel):
                 contract.pay_rate,
                 allowances,
                 wage_is_the_pot=ctc_down,
+                paid_per_task=contract.paid_per_task,
             )
             # A figure only where one can honestly be given. A monthly wage IS
             # the period's basic pay; an hourly or daily one becomes basic only
@@ -3889,6 +3951,7 @@ class SalaryStructure(HorillaModel):
                     not in (
                         BASIC_FROM_CONTRACT,
                         BASIC_FROM_COMPONENT,
+                        BASIC_FROM_TASKS,
                     ),
                     # pay_rate, not wage: an hourly contract keeps its figure in
                     # its own box, and showing `wage` there would show a number
@@ -3939,7 +4002,8 @@ class SalaryStructure(HorillaModel):
         if basic_pay_component(self.allowances.all()) is not None:
             return 0
 
-        contracts = self._active_contracts()
+        # Paid per task has no basic pay by design, so it is not missing one.
+        contracts = self._active_contracts().exclude(wage_type="task")
 
         # "States a figure to read basic from", matching Contract.pay_rate:
         # the wage, except on an hourly contract, where it is hourly_wage.

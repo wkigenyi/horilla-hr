@@ -937,8 +937,14 @@ def if_condition_on(*_args, **kwargs):
     # the contract states no wage, so basic is 0 at that moment by definition,
     # and the gate would zero the very component that was about to set it.
     # Any rule someone actually configured still applies.
+    #
+    # And one contract it cannot be asked of at all: paid per task, where basic
+    # pay is zero by design and the pay is the task pay itself. There the gate
+    # would zero every earning, task pay included, and every deduction with it.
     rules = []
-    if not (getattr(component, "is_basic_pay", False) and _is_default_gate(component)):
+    per_task = bool((kwargs.get("component_context") or {}).get("_paid_per_task"))
+    default_gate = _is_default_gate(component)
+    if not (default_gate and (per_task or getattr(component, "is_basic_pay", False))):
         rules.append(component)
     rules.extend(_extra_apply_conditions(component))
     for rule in rules:

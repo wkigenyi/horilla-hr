@@ -744,6 +744,45 @@ def monthly_computation(employee, wage, start_date, end_date, *args, **kwargs):
     }
 
 
+def task_computation(month_summary, start_date, end_date):
+    """
+    The period figures for a contract paid per task.
+
+    There is no basic pay and no day rate, so nothing is earned or lost by the
+    day: absence and unpaid leave cost nothing because nothing was promised for
+    those days. The pay itself is the task pay confirmed for the period, which
+    reaches the payslip as one-time earnings, like any other arrears.
+
+    The day counts are still reported, from the attendance summary when there
+    is one, so the payslip shows the same days as every other.
+    """
+    month_summary = month_summary or {}
+    present = month_summary.get("present", 0)
+    paid_leave = month_summary.get("paid_leave", 0)
+    week_off = month_summary.get("week_off", 0)
+    holiday = month_summary.get("holiday", 0)
+    unpaid_leave = month_summary.get("unpaid_leave", 0)
+    absent = month_summary.get("absent", 0)
+    return {
+        "basic_pay": 0.0,
+        "loss_of_pay": 0.0,
+        "custom_leave_deduction": 0.0,
+        "custom_leave_breakdown": [],
+        "lop_from_gross": False,
+        "lop_unpaid_days": 0,
+        "month_data": months_between_range(0, start_date, end_date),
+        "paid_days": float(present + paid_leave + week_off + holiday),
+        "unpaid_days": unpaid_leave + absent,
+        "partial_pay_days": 0,
+        "present": present,
+        "paid_leave": paid_leave,
+        "unpaid_leave": unpaid_leave,
+        "absent": absent,
+        "week_off": week_off,
+        "holiday": holiday,
+        "total_working": month_summary.get("total_working", 0),
+    }
+
 def compute_salary_on_period(
     employee, start_date, end_date, wage=None, month_summary=None, prorate_slice=False
 ):
@@ -869,6 +908,8 @@ def compute_salary_on_period(
             data.setdefault("holiday", 0)
             data.setdefault("total_working", 0)
             data["contract"] = contract
+    elif wage_type == "task":
+        data = task_computation(month_summary, start_date, end_date)
     else:
         if month_summary:
             total_days = (

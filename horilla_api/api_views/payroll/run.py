@@ -164,6 +164,7 @@ def _review_payload(result):
             {
                 "employee": employee_brief(row["employee"]),
                 "contract_id": row["contract"].pk,
+                "paid_per_task": row["contract"].paid_per_task,
                 "present": row["present"],
                 "paid_leave": row["paid_leave"],
                 "unpaid_leave": row["unpaid_leave"],

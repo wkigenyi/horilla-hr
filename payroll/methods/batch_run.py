@@ -104,6 +104,15 @@ def eligible_employees(employees, start_date, end_date):
         ).exists():
             excluded.append((employee, _("Already has a payslip for this period")))
             continue
+        no_pay = no_task_pay_reason(
+            employee,
+            [contract for contract, *_dates in contracts_in_period(employee, start_date, end_date)],
+            start_date,
+            end_date,
+        )
+        if no_pay:
+            excluded.append((employee, no_pay))
+            continue
         ok.append(employee)
     return ok, excluded
 
@@ -141,6 +150,78 @@ def recovery_over_pay(employee, contract, start_date, end_date):
         return None
     return total, pay, [entry.title for entry in due]
 
+
+def task_pay_counts(employee, start_date, end_date):
+    """
+    ``(confirmed, drafts)``: the arrears entries dated in the period, by status.
+
+    For a contract paid per task these are its pay. Confirmed ones are on the
+    payslip; drafts are not until someone confirms them.
+    """
+    from payroll.models.models import PayAdjustment
+
+    entries = PayAdjustment.objects.filter(
+        employee_id=employee,
+        kind="arrears",
+        pay_date__range=(start_date, end_date),
+    )
+    return (
+        entries.filter(status="approved").count(),
+        entries.filter(status="draft").count(),
+    )
+
+
+def no_task_pay_reason(employee, contracts, start_date, end_date):
+    """
+    Why someone paid only per task gets no payslip this period, or ``None``.
+
+    A payslip of zero is of no use to anyone, so a casual worker with no
+    confirmed task pay in the period is left out of the run rather than paid
+    nothing. Only when every contract in force is paid per task: anyone with a
+    wage on some part of the period is still paid for it.
+    """
+    if not contracts or not all(contract.paid_per_task for contract in contracts):
+        return None
+    confirmed, drafts = task_pay_counts(employee, start_date, end_date)
+    if confirmed:
+        return None
+    if drafts == 1:
+        return _("Paid per task: 1 task pay entry is still in draft. Confirm it to pay them.")
+    if drafts:
+        return _(
+            "Paid per task: %(count)s task pay entries are still in draft. "
+            "Confirm them to pay them."
+        ) % {"count": drafts}
+    return _("Paid per task: no task pay in this period")
+
+
+def task_pay_warnings(employee, start_date, end_date):
+    """
+    What a contract paid per task needs said before its payslip is made.
+
+    Someone with no confirmed task pay is not here at all (see
+    no_task_pay_reason). Someone with some can still have more in draft, which
+    this payslip will not carry; a warning, because what is confirmed should
+    still be paid.
+    """
+    if not (start_date and end_date):
+        return []
+    _confirmed, drafts = task_pay_counts(employee, start_date, end_date)
+    if not drafts:
+        return []
+    message = (
+        _(
+            "Paid Per Task: 1 Task Pay Entry Still In Draft Is Not On This Payslip. "
+            "Confirm It In Arrears & Recovery First To Pay It."
+        )
+        if drafts == 1
+        else _(
+            "Paid Per Task: %(count)s Task Pay Entries Still In Draft Are Not On This "
+            "Payslip. Confirm Them In Arrears & Recovery First To Pay Them."
+        )
+        % {"count": drafts}
+    )
+    return [(WARNING, message)]
 
 def _exceptions_for(row, employee, contract, start_date=None, end_date=None):
     """
@@ -185,7 +266,9 @@ def _exceptions_for(row, employee, contract, start_date=None, end_date=None):
             )
         )
 
-    if not contract.pay_rate:
+    if contract.paid_per_task:
+        problems.extend(task_pay_warnings(employee, start_date, end_date))
+    elif not contract.pay_rate:
         from payroll.methods.basic_pay_source import basic_pay_component
 
         structure = contract.salary_structure_id
@@ -285,7 +368,13 @@ def review(employees, start_date, end_date):
         )
 
     for row in rows:
-        row["low_paid"] = not row["blocked"] and row["paid_days"] < LOW_PAID_DAYS
+        # Days do not set the pay of a contract paid per task, so few of them
+        # says nothing about it.
+        row["low_paid"] = (
+            not row["blocked"]
+            and not row["contract"].paid_per_task
+            and row["paid_days"] < LOW_PAID_DAYS
+        )
 
     rows.sort(key=lambda r: (not r["blocked"], str(r["employee"])))
     return {
@@ -509,9 +598,27 @@ def _generate_one(
     # worked out per employee and never written back to the batch: the old bulk loop mutated its
     # own start_date for a mid-period contract and never restored it, so one late joiner shifted
     # the period for everybody after them.
+    # Task pay can be sent back to draft between reviewing and generating, and
+    # a period can hold a per-task contract beside a waged one. Either way a
+    # per-task slice with no confirmed task pay would be a payslip of zero, so
+    # it is left out; if nothing is left, the person is skipped.
+    # Counted before any is left out: a contract's days are still its own share
+    # of the period when the other contract's slice is dropped.
+    several = len(slices) > 1
+    slices = [
+        (contract, start_date, end_date)
+        for contract, start_date, end_date in slices
+        if not no_task_pay_reason(employee, [contract], start_date, end_date)
+    ]
+    if not slices:
+        line.status = PayrollBatchLine.SKIPPED
+        line.message = str(_("Paid per task: no confirmed task pay in this period"))
+        line.save(update_fields=["status", "message"])
+        return
+
     payslip = None
     for contract, start_date, end_date in slices:
-        if len(slices) == 1:
+        if not several:
             # One contract: the batch's own attendance summary, as it always was. A joiner's or
             # leaver's days outside the contract are unpaid days in it.
             slice_summary, prorate = summary or {}, False

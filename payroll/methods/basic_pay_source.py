@@ -30,6 +30,10 @@ produced a payslip with no basic pay at all.
 CONTRACT = "contract"
 COMPONENT = "component"
 NEITHER = "neither"
+# A casual contract paid per task: basic is zero on purpose, the pay is the task
+# pay posted for the period, and the flagged earning is not paid either -- it
+# would hand a casual worker a basic their contract says they do not have.
+TASKS = "tasks"
 
 
 def basic_pay_component(allowances):
@@ -46,7 +50,9 @@ def basic_pay_component(allowances):
     return None
 
 
-def resolve_basic_pay_source(contract_basic, allowances, wage_is_the_pot=False):
+def resolve_basic_pay_source(
+    contract_basic, allowances, wage_is_the_pot=False, paid_per_task=False
+):
     """
     Which source is in force, as ``(source, component)``.
 
@@ -68,6 +74,8 @@ def resolve_basic_pay_source(contract_basic, allowances, wage_is_the_pot=False):
     once as basic pay on top. The component is then the only source.
     """
     component = basic_pay_component(allowances)
+    if paid_per_task:
+        return TASKS, component
     if wage_is_the_pot:
         return (COMPONENT, component) if component is not None else (NEITHER, None)
     if contract_basic and float(contract_basic) > 0:
@@ -96,6 +104,11 @@ def describe(source, component=None, contract_basic=None):
                 "is not paid, because their basic is already set."
             ) % {"component": component.title}
         return _("Basic pay comes from each employee's contract wage.")
+    if source == TASKS:
+        return _(
+            "Paid per task: no basic pay. The pay is the task pay confirmed "
+            "for the period."
+        )
     if source == COMPONENT:
         return _(
             "Basic pay is worked out by %(component)s, for employees whose "

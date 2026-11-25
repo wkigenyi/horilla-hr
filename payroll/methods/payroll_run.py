@@ -24,6 +24,7 @@ from horilla.methods import get_horilla_model_class
 from payroll.methods.basic_pay_source import COMPONENT as BASIC_FROM_COMPONENT
 from payroll.methods.basic_pay_source import CONTRACT as BASIC_FROM_CONTRACT
 from payroll.methods.basic_pay_source import NEITHER as BASIC_FROM_NEITHER
+from payroll.methods.basic_pay_source import TASKS as BASIC_FROM_TASKS
 from payroll.methods.basic_pay_source import resolve_basic_pay_source
 from payroll.methods.component_engine import (
     add_service_years,
@@ -265,6 +266,7 @@ def payroll_calculation(
         contract.pay_rate,
         eligible_allowances(employee, start_date, end_date),
         wage_is_the_pot=wage_is_the_pot,
+        paid_per_task=contract.paid_per_task,
     )
 
     if structure_mode == "ctc_down":
@@ -293,13 +295,19 @@ def payroll_calculation(
     component_context["UNPAID_DAYS"] = unpaid_days
     component_context["LOP"] = loss_of_pay
     add_service_years(component_context, employee, contract, end_date)
+    if contract.paid_per_task:
+        # Read by if_condition_on: the default "basic pay > 0" gate means "is
+        # this employee paid at all", which basic cannot answer here.
+        component_context["_paid_per_task"] = True
 
     # The flagged earning is skipped when the contract already states basic.
     # Paying it as well would add a second basic on top of the one that is
     # already in gross.
+    # Paid per task skips it too: the contract says there is no basic pay.
     skip_component = (
         basic_component
-        if basic_source == BASIC_FROM_CONTRACT and basic_component is not None
+        if basic_source in (BASIC_FROM_CONTRACT, BASIC_FROM_TASKS)
+        and basic_component is not None
         else None
     )
 
