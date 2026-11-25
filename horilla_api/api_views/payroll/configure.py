@@ -985,6 +985,92 @@ class ContractStatusView(APIView):
         )
 
 
+class ContractWageTypeView(APIView):
+    """
+    Change the wage type on several contracts at once.
+
+    Only draft and active contracts change: an expired or terminated one is a
+    record of what was paid. Each change is checked the way saving one contract
+    is, so one that a salary structure would refuse is skipped with the reason.
+    Per task clears the wage, hourly rate and monthly CTC, as it does on a single
+    contract. Between the other types the wage figure stays as it is and is read
+    in the new unit, so those contracts are named for someone to check.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    CHANGEABLE = ("draft", "active")
+
+    def post(self, request):
+        blocked = require_perm(request, "payroll.change_contract")
+        if blocked:
+            return blocked
+        wage_type = request.data.get("wage_type")
+        labels = dict(Contract.WAGE_CHOICES)
+        if wage_type not in labels:
+            return Response({"wage_type": [_("Choose a wage type.")]}, status=400)
+        contracts = Contract.objects.filter(
+            pk__in=as_id_list(request.data.get("ids"))
+        ).select_related("employee_id", "salary_structure_id")
+
+        units = {
+            "daily": _("per day"),
+            "monthly": _("per month"),
+            "hourly": _("per hour"),
+        }
+        updated, unchanged, skipped, check = [], [], [], []
+        for contract in contracts:
+            name = f"{contract.employee_id} — {contract.contract_name}"
+            if contract.contract_status not in self.CHANGEABLE:
+                skipped.append(
+                    {
+                        "id": contract.pk,
+                        "contract": name,
+                        "reason": _("It has ended, so it keeps the wage type it was paid on."),
+                    }
+                )
+                continue
+            if contract.wage_type == wage_type:
+                unchanged.append(contract.pk)
+                continue
+            before = contract.wage_type
+            contract.wage_type = wage_type
+            try:
+                contract.clean()
+            except ValidationError as error:
+                skipped.append(
+                    {"id": contract.pk, "contract": name, "reason": " ".join(error.messages)}
+                )
+                continue
+            contract.save()
+            updated.append(contract.pk)
+            if wage_type == "task":
+                continue
+            if not (contract.pay_rate and contract.pay_rate > 0):
+                check.append(
+                    {"id": contract.pk, "contract": name, "reason": _("It has no wage yet.")}
+                )
+            elif before != "task":
+                check.append(
+                    {
+                        "id": contract.pk,
+                        "contract": name,
+                        "reason": _("Its wage is now read %(unit)s.")
+                        % {"unit": units.get(wage_type, labels[wage_type].lower())},
+                    }
+                )
+        return Response(
+            {
+                "wage_type": wage_type,
+                "updated": updated,
+                "unchanged": unchanged,
+                "skipped": skipped,
+                "check": check,
+            },
+            status=200,
+        )
+
+
 class ContractComponentView(APIView):
     permission_classes = [IsAuthenticated]
 
