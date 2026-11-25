@@ -1,6 +1,6 @@
 """Payroll configuration the classic settings screens expose, as JSON."""
 
-from datetime import date
+from datetime import date, timedelta
 
 from django.core.exceptions import ValidationError
 from django.db.models import ProtectedError, Sum
@@ -982,6 +982,96 @@ class ContractStatusView(APIView):
             updated.append(contract.pk)
         return Response(
             {"updated": updated, "skipped": skipped, "status": status}, status=200
+        )
+
+
+class ContractStartDateView(APIView):
+    """
+    Move the start date of several contracts at once.
+
+    Only draft and active contracts move: an ended one is a record of what was
+    paid. Each move is checked the way saving one contract is, so it may not
+    start before the employee joined or after its own end date. A contract is
+    also left alone when a payslip already covers a day the move would add to
+    or take from it, because that payslip was worked out on the old dates.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    CHANGEABLE = ("draft", "active")
+
+    def post(self, request):
+        blocked = require_perm(request, "payroll.change_contract")
+        if blocked:
+            return blocked
+        try:
+            start = date.fromisoformat(str(request.data.get("start_date") or ""))
+        except ValueError:
+            return Response({"start_date": [_("Choose a start date.")]}, status=400)
+        contracts = Contract.objects.filter(
+            pk__in=as_id_list(request.data.get("ids"))
+        ).select_related("employee_id__employee_work_info")
+
+        updated, unchanged, skipped = [], [], []
+        for contract in contracts:
+            name = f"{contract.employee_id} — {contract.contract_name}"
+            if contract.contract_status not in self.CHANGEABLE:
+                skipped.append(
+                    {
+                        "id": contract.pk,
+                        "contract": name,
+                        "reason": _("It has ended, so its dates are a record of what was paid."),
+                    }
+                )
+                continue
+            before = contract.contract_start_date
+            if before == start:
+                unchanged.append(contract.pk)
+                continue
+            # The days that gain or lose the contract.
+            first = min(before, start)
+            last = max(before, start) - timedelta(days=1)
+            paid = (
+                Payslip.objects.entire()
+                .filter(
+                    employee_id=contract.employee_id,
+                    start_date__lte=last,
+                    end_date__gte=first,
+                )
+                .order_by("start_date")
+                .first()
+            )
+            if paid is not None:
+                skipped.append(
+                    {
+                        "id": contract.pk,
+                        "contract": name,
+                        "reason": _(
+                            "A payslip for %(start)s to %(end)s was worked out on the "
+                            "current start date. Delete or redo that payslip first."
+                        )
+                        % {"start": paid.start_date, "end": paid.end_date},
+                    }
+                )
+                continue
+            contract.contract_start_date = start
+            try:
+                contract.clean()
+            except ValidationError as error:
+                skipped.append(
+                    {"id": contract.pk, "contract": name, "reason": " ".join(error.messages)}
+                )
+                continue
+            contract.save()
+            updated.append(contract.pk)
+        return Response(
+            {
+                "start_date": start,
+                "updated": updated,
+                "unchanged": unchanged,
+                "skipped": skipped,
+            },
+            status=200,
         )
 
 

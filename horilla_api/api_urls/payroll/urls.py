@@ -33,6 +33,7 @@ from horilla_api.api_views.payroll.configure import (
     ComponentLibraryView,
     ComponentLimitPreviewView,
     ContractComponentView,
+    ContractStartDateView,
     ContractStatusView,
     ContractWageTypeView,
     ContributionView,
@@ -314,6 +315,11 @@ urlpatterns = [
         "contract/bulk-status/",
         ContractStatusView.as_view(),
         name="api-contract-bulk-status",
+    ),
+    path(
+        "contract/bulk-start-date/",
+        ContractStartDateView.as_view(),
+        name="api-contract-bulk-start-date",
     ),
     path(
         "contract/bulk-wage-type/",
